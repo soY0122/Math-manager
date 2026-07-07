@@ -1,70 +1,54 @@
 import 'dart:async';
-import 'package:hive_flutter/hive_flutter.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:intl/intl.dart';
+import 'package:rxdart/rxdart.dart';
 import '../../domain/models/settings_models.dart';
 import '../../domain/repositories/settings_repository.dart';
-import '../../../../core/database/database.dart';
 
 class SettingsRepositoryImpl implements SettingsRepository {
-  final AppDatabase db;
+  SettingsRepositoryImpl();
 
-  SettingsRepositoryImpl(this.db);
 
-  Stream<void> _watchMulti(List<Box> boxes) async* {
-    yield null; // Initial trigger
-    final controller = StreamController<void>();
-    final subs = <StreamSubscription>[];
-    for (final box in boxes) {
-      subs.add(box.watch().listen((_) {
-        if (!controller.isClosed) controller.add(null);
-      }));
-    }
-    controller.onCancel = () {
-      for (final s in subs) {
-        s.cancel();
-      }
-      controller.close();
-    };
-    yield* controller.stream;
+
+  Timestamp _parseDate(String dateStr) {
+    final parsed = DateTime.tryParse(dateStr) ?? DateTime.now();
+    return Timestamp.fromDate(DateTime(parsed.year, parsed.month, parsed.day));
   }
 
   @override
   Stream<List<ScheduleItem>> watchSchedulesForDate(String dateStr) {
-    return db.schedulesBox.watch().map((_) => _getSchedulesForDate(dateStr))
-        .startWith(_getSchedulesForDate(dateStr));
-  }
-
-  List<ScheduleItem> _getSchedulesForDate(String dateStr) {
-    final all = db.schedulesBox.values.toList();
-    final filtered = all.where((s) => s['date'] == dateStr).toList();
-    return filtered.map((s) {
-      return ScheduleItem(
-        id: s['id'] as int,
-        title: s['title'] as String,
-        date: s['date'] as String,
-        type: s['type'] as String,
-        memo: s['memo'] as String?,
-      );
-    }).toList();
+    final targetTimestamp = _parseDate(dateStr);
+    return FirebaseFirestore.instance
+        .collection('schedules')
+        .where('date', isEqualTo: targetTimestamp)
+        .snapshots()
+        .map((snap) => snap.docs.map((doc) {
+              final data = doc.data();
+              return ScheduleItem(
+                id: doc.id,
+                title: data['title'] as String? ?? '',
+                date: dateStr,
+                type: data['type'] as String? ?? 'EXAM',
+                memo: data['memo'] as String?,
+              );
+            }).toList());
   }
 
   @override
   Stream<List<ScheduleItem>> watchAllSchedules() {
-    return db.schedulesBox.watch().map((_) => _getAllSchedules())
-        .startWith(_getAllSchedules());
-  }
-
-  List<ScheduleItem> _getAllSchedules() {
-    final all = db.schedulesBox.values.toList();
-    all.sort((a, b) => (a['date'] as String).compareTo(b['date'] as String));
-    return all.map((s) {
-      return ScheduleItem(
-        id: s['id'] as int,
-        title: s['title'] as String,
-        date: s['date'] as String,
-        type: s['type'] as String,
-        memo: s['memo'] as String?,
-      );
-    }).toList();
+    return FirebaseFirestore.instance.collection('schedules').snapshots()
+        .map((snap) => snap.docs.map((doc) {
+              final data = doc.data();
+              final dateTs = data['date'] as Timestamp?;
+              final dateStr = dateTs != null ? DateFormat('yyyy-MM-dd').format(dateTs.toDate()) : '';
+              return ScheduleItem(
+                id: doc.id,
+                title: data['title'] as String? ?? '',
+                date: dateStr,
+                type: data['type'] as String? ?? 'EXAM',
+                memo: data['memo'] as String?,
+              );
+            }).toList());
   }
 
   @override
@@ -73,192 +57,172 @@ class SettingsRepositoryImpl implements SettingsRepository {
     required String date,
     required String type,
     String? memo,
-    int? studentId,
+    String? studentId,
   }) async {
-    final keys = db.schedulesBox.keys.toList();
-    final newId = keys.isNotEmpty ? (keys.cast<int>().reduce((a, b) => a > b ? a : b) + 1) : 1;
-
-    await db.schedulesBox.put(newId, {
-      'id': newId,
+    final targetTimestamp = _parseDate(date);
+    await FirebaseFirestore.instance.collection('schedules').add({
       'title': title,
-      'date': date,
+      'date': targetTimestamp,
       'type': type,
-      'memo': memo,
-      if (studentId != null) 'student_id': studentId,
+      'memo': memo ?? '',
+      'studentId': studentId,
+      'createdAt': FieldValue.serverTimestamp(),
+      'updatedAt': FieldValue.serverTimestamp(),
     });
   }
 
   @override
   Future<void> updateSchedule({
-    required int id,
+    required String id,
     required String title,
     required String date,
     String? memo,
   }) async {
-    final scheduleMap = db.schedulesBox.get(id);
-    if (scheduleMap != null) {
-      final map = Map<String, dynamic>.from(scheduleMap);
-      map['title'] = title;
-      map['date'] = date;
-      map['memo'] = memo;
-      await db.schedulesBox.put(id, map);
-    }
+    final targetTimestamp = _parseDate(date);
+    await FirebaseFirestore.instance.collection('schedules').doc(id).update({
+      'title': title,
+      'date': targetTimestamp,
+      'memo': memo ?? '',
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
   }
 
   @override
-  Future<void> deleteSchedule(int id) async {
-    await db.schedulesBox.delete(id);
+  Future<void> deleteSchedule(String id) async {
+    await FirebaseFirestore.instance.collection('schedules').doc(id).delete();
   }
 
   @override
   Stream<AcademyStats> watchAcademyStats({int? gradeFilter}) {
-    return _watchMulti([
-      db.studentsBox,
-      db.examRecordsBox,
-      db.attendancesBox,
-      db.homeworksBox,
-    ]).asyncMap((_) async {
-      final allStudents = db.studentsBox.values.toList();
-      var activeStudents = allStudents.where((s) => s['is_active'] == true).toList();
-      if (gradeFilter != null) {
-        activeStudents = activeStudents.where((s) => s['grade'] == gradeFilter).toList();
-      }
-      final activeStudentIds = activeStudents.map((s) => s['id'] as int).toSet();
+    final studentsStream = FirebaseFirestore.instance.collection('students').snapshots();
+    final examRecordsStream = FirebaseFirestore.instance.collection('exam_records').snapshots();
+    final attendancesStream = FirebaseFirestore.instance.collection('attendances').snapshots();
+    final homeworksStream = FirebaseFirestore.instance.collection('homeworks').snapshots();
 
-      final allRecords = db.examRecordsBox.values.toList();
-      final allAttendances = db.attendancesBox.values.toList();
-      final allHomeworks = db.homeworksBox.values.toList();
+    return Rx.combineLatest4<
+        QuerySnapshot<Map<String, dynamic>>,
+        QuerySnapshot<Map<String, dynamic>>,
+        QuerySnapshot<Map<String, dynamic>>,
+        QuerySnapshot<Map<String, dynamic>>,
+        AcademyStats>(
+      studentsStream,
+      examRecordsStream,
+      attendancesStream,
+      homeworksStream,
+      (studentsSnap, examRecordsSnap, attendancesSnap, homeworksSnap) {
+        final allStudentsDocs = studentsSnap.docs;
+        final allStudents = allStudentsDocs.map((doc) => doc.data()..['docId'] = doc.id).toList();
+        final allRecords = examRecordsSnap.docs.map((doc) => doc.data()).toList();
+        final allAttendances = attendancesSnap.docs.map((doc) => doc.data()).toList();
+        final allHomeworks = homeworksSnap.docs.map((doc) => doc.data()).toList();
 
-      // Compute student analytics
-      final List<RankingItem> scoreRankings = [];
-      final List<RankingItem> growthRankings = [];
+        final activeStudents = allStudents.where((s) => s['isActive'] == true).toList();
 
-      final Map<int, List<int>> studentScoresMap = {};
-      for (final r in allRecords) {
-        final sId = r['student_id'] as int;
-        if (activeStudentIds.contains(sId)) {
-          studentScoresMap.putIfAbsent(sId, () => []).add(r['score'] as int);
-        }
-      }
-
-      final Map<int, List<String>> studentAttsMap = {};
-      for (final a in allAttendances) {
-        final sId = a['student_id'] as int;
-        if (activeStudentIds.contains(sId)) {
-          studentAttsMap.putIfAbsent(sId, () => []).add(a['status'] as String);
-        }
-      }
-
-      final Map<int, List<String>> studentHwsMap = {};
-      for (final h in allHomeworks) {
-        final sId = h['student_id'] as int;
-        if (activeStudentIds.contains(sId)) {
-          studentHwsMap.putIfAbsent(sId, () => []).add(h['status'] as String);
-        }
-      }
-
-      for (final s in activeStudents) {
-        final id = s['id'] as int;
-        final name = s['name'] as String;
-        final grade = s['grade'] as int;
-        final className = s['class_name'] as String;
-
-        final scores = studentScoresMap[id] ?? [];
-        final avgScore = scores.isNotEmpty ? scores.reduce((a, b) => a + b) / scores.length : 0.0;
-
-        double growthRate = 0.0;
-        if (scores.length >= 2) {
-          final latest = scores[scores.length - 1];
-          final previous = scores[scores.length - 2];
-          if (previous > 0) {
-            growthRate = ((latest - previous) / previous) * 100;
+        final List<GradeStats> gradeStatsList = [];
+        for (int grade = 1; grade <= 9; grade++) {
+          final gradeStudents = activeStudents.where((s) => s['grade'] == grade).toList();
+          if (gradeStudents.isEmpty) {
+            gradeStatsList.add(GradeStats(
+              grade: grade,
+              averageScore: 0.0,
+              attendanceRate: 1.0,
+              homeworkRate: 1.0,
+            ));
+            continue;
           }
-        }
 
-        scoreRankings.add(RankingItem(
-          studentId: id,
-          name: name,
-          grade: grade,
-          className: className,
-          value: avgScore,
-        ));
+          final gradeStudentIds = gradeStudents.map((s) => s['docId'] as String).toSet();
 
-        growthRankings.add(RankingItem(
-          studentId: id,
-          name: name,
-          grade: grade,
-          className: className,
-          value: growthRate,
-        ));
-      }
+          final gradeRecords = allRecords.where((r) => gradeStudentIds.contains(r['studentId'])).toList();
+          final double avgScore = gradeRecords.isNotEmpty
+              ? gradeRecords.map((r) => r['score'] as int).reduce((a, b) => a + b) / gradeRecords.length
+              : 0.0;
 
-      // Sort rankings
-      scoreRankings.sort((a, b) => b.value.compareTo(a.value));
-      growthRankings.sort((a, b) => b.value.compareTo(a.value));
-
-      // Calculate grade statistics (grades 1 to 9)
-      final List<GradeStats> gradeStats = [];
-      for (int grade = 1; grade <= 9; grade++) {
-        final gradeStudents = activeStudents.where((s) => s['grade'] == grade).toList();
-        if (gradeStudents.isEmpty) {
-          continue;
-        }
-
-        double totalAvgScores = 0.0;
-        double totalAttendanceRates = 0.0;
-        double totalHwRates = 0.0;
-
-        for (final student in gradeStudents) {
-          final id = student['id'] as int;
-
-          // Exam avg
-          final scores = studentScoresMap[id] ?? [];
-          final studentAvg = scores.isNotEmpty ? scores.reduce((a, b) => a + b) / scores.length : 0.0;
-          totalAvgScores += studentAvg;
-
-          // Attendance rate
-          final atts = studentAttsMap[id] ?? [];
+          final gradeAtts = allAttendances.where((a) => gradeStudentIds.contains(a['studentId'])).toList();
           int present = 0;
-          int lates = 0;
-          for (final st in atts) {
-            if (st == 'ATTENDANCE') present++;
-            if (st == 'LATE') lates++;
+          int late = 0;
+          for (final a in gradeAtts) {
+            if (a['status'] == 'ATTENDANCE') present++;
+            if (a['status'] == 'LATE') late++;
           }
-          final attRate = atts.isNotEmpty ? (present + lates) / atts.length : 1.0;
-          totalAttendanceRates += attRate;
+          final double attRate = gradeAtts.isNotEmpty ? (present + late) / gradeAtts.length : 1.0;
 
-          // Homework rate
-          final hws = studentHwsMap[id] ?? [];
+          final gradeHws = allHomeworks.where((h) => gradeStudentIds.contains(h['studentId'])).toList();
           int completed = 0;
           int partial = 0;
-          for (final st in hws) {
-            if (st == 'COMPLETED') completed++;
-            if (st == 'PARTIAL') partial++;
+          for (final h in gradeHws) {
+            if (h['status'] == 'COMPLETED') completed++;
+            if (h['status'] == 'PARTIAL') partial++;
           }
-          final hwRate = hws.isNotEmpty ? (completed + (partial * 0.5)) / hws.length : 1.0;
-          totalHwRates += hwRate;
+          final double hwRate = gradeHws.isNotEmpty ? (completed + (partial * 0.5)) / gradeHws.length : 1.0;
+
+          gradeStatsList.add(GradeStats(
+            grade: grade,
+            averageScore: avgScore,
+            attendanceRate: attRate,
+            homeworkRate: hwRate,
+          ));
         }
 
-        gradeStats.add(GradeStats(
-          grade: grade,
-          averageScore: totalAvgScores / gradeStudents.length,
-          attendanceRate: totalAttendanceRates / gradeStudents.length,
-          homeworkRate: totalHwRates / gradeStudents.length,
-        ));
-      }
+        final List<RankingItem> scoreRankings = [];
+        final List<RankingItem> growthRankings = [];
 
-      return AcademyStats(
-        gradeStats: gradeStats,
-        scoreRankings: scoreRankings,
-        growthRankings: growthRankings,
-      );
-    });
-  }
-}
+        var targetStudents = activeStudents;
+        if (gradeFilter != null) {
+          targetStudents = targetStudents.where((s) => s['grade'] == gradeFilter).toList();
+        }
 
-extension StreamExtension<T> on Stream<T> {
-  Stream<T> startWith(T initialValue) async* {
-    yield initialValue;
-    yield* this;
+        for (final s in targetStudents) {
+          final studentId = s['docId'] as String;
+          final name = s['name'] as String? ?? '';
+          final grade = s['grade'] as int? ?? 1;
+          final className = s['className'] as String? ?? '';
+
+          final studentScores = allRecords
+              .where((r) => r['studentId'] == studentId)
+              .toList();
+          studentScores.sort((a, b) => (a['examId'] as String).compareTo(b['examId'] as String));
+          final scoresList = studentScores.map((r) => r['score'] as int).toList();
+
+          final double avgScore = scoresList.isNotEmpty
+              ? scoresList.reduce((a, b) => a + b) / scoresList.length
+              : 0.0;
+
+          double growthRate = 0.0;
+          if (scoresList.length >= 2) {
+            final latest = scoresList[scoresList.length - 1];
+            final previous = scoresList[scoresList.length - 2];
+            if (previous > 0) {
+              growthRate = ((latest - previous) / previous) * 100;
+            }
+          }
+
+          scoreRankings.add(RankingItem(
+            studentId: studentId,
+            name: name,
+            grade: grade,
+            className: className,
+            value: avgScore,
+          ));
+
+          growthRankings.add(RankingItem(
+            studentId: studentId,
+            name: name,
+            grade: grade,
+            className: className,
+            value: growthRate,
+          ));
+        }
+
+        scoreRankings.sort((a, b) => b.value.compareTo(a.value));
+        growthRankings.sort((a, b) => b.value.compareTo(a.value));
+
+        return AcademyStats(
+          gradeStats: gradeStatsList,
+          scoreRankings: scoreRankings,
+          growthRankings: growthRankings,
+        );
+      },
+    );
   }
 }

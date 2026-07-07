@@ -6,7 +6,7 @@ import '../../../core/widgets/math_card.dart';
 import '../../../core/widgets/math_loader.dart';
 
 class TestScoreInputScreen extends ConsumerStatefulWidget {
-  final int examId;
+  final String examId;
 
   const TestScoreInputScreen({
     super.key,

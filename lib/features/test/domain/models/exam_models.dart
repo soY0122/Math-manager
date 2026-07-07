@@ -1,5 +1,5 @@
 class ExamOverview {
-  final int id;
+  final String id;
   final String title;
   final String date;
   final int grade;
@@ -21,12 +21,12 @@ class ExamOverview {
 }
 
 class StudentExamScoreItem {
-  final int studentId;
+  final String studentId;
   final String studentName;
   final String school;
   final int grade;
   final String className;
-  final int? recordId;
+  final String? recordId;
   final int score;
 
   const StudentExamScoreItem({
@@ -40,12 +40,12 @@ class StudentExamScoreItem {
   });
 
   StudentExamScoreItem copyWith({
-    int? studentId,
+    String? studentId,
     String? studentName,
     String? school,
     int? grade,
     String? className,
-    int? recordId,
+    String? recordId,
     int? score,
   }) {
     return StudentExamScoreItem(

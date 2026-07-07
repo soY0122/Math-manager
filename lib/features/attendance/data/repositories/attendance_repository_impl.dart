@@ -1,110 +1,161 @@
 import 'dart:async';
-import 'package:hive_flutter/hive_flutter.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:rxdart/rxdart.dart';
 import '../../domain/models/student_attendance_item.dart';
 import '../../domain/repositories/attendance_repository.dart';
-import '../../../../core/database/database.dart';
 
 class AttendanceRepositoryImpl implements AttendanceRepository {
-  final AppDatabase db;
+  AttendanceRepositoryImpl();
 
-  AttendanceRepositoryImpl(this.db);
-
-  Stream<void> _watchMulti(List<Box> boxes) async* {
-    yield null; // Initial trigger
-    final controller = StreamController<void>();
-    final subs = <StreamSubscription>[];
-    for (final box in boxes) {
-      subs.add(box.watch().listen((_) {
-        if (!controller.isClosed) controller.add(null);
-      }));
-    }
-    controller.onCancel = () {
-      for (final s in subs) {
-        s.cancel();
-      }
-      controller.close();
-    };
-    yield* controller.stream;
+  Timestamp _parseDate(String dateStr) {
+    final parsed = DateTime.tryParse(dateStr) ?? DateTime.now();
+    return Timestamp.fromDate(DateTime(parsed.year, parsed.month, parsed.day));
   }
 
   @override
   Stream<List<StudentAttendanceItem>> watchAttendanceForDate(String date, {int? gradeFilter}) {
-    return _watchMulti([db.studentsBox, db.attendancesBox]).asyncMap((_) async {
-      final List<StudentAttendanceItem> list = [];
+    final studentsStream = FirebaseFirestore.instance.collection('students').snapshots();
+    final attendancesStream = FirebaseFirestore.instance.collection('attendances').snapshots();
 
-      final allStudents = db.studentsBox.values.toList();
-      var activeStudents = allStudents.where((s) => s['is_active'] == true).toList();
-      if (gradeFilter != null) {
-        activeStudents = activeStudents.where((s) => s['grade'] == gradeFilter).toList();
-      }
-      activeStudents.sort((a, b) => (a['name'] as String).compareTo(b['name'] as String));
+    return Rx.combineLatest2<
+        QuerySnapshot<Map<String, dynamic>>,
+        QuerySnapshot<Map<String, dynamic>>,
+        List<StudentAttendanceItem>>(
+      studentsStream,
+      attendancesStream,
+      (studentsSnap, attendancesSnap) {
+        final List<StudentAttendanceItem> list = [];
 
-      for (final s in activeStudents) {
-        final studentId = s['id'] as int;
-        final studentName = s['name'] as String;
-        final school = s['school'] as String;
-        final grade = s['grade'] as int;
-        final className = s['class_name'] as String;
+        final allStudents = studentsSnap.docs;
+        final allAttendances = attendancesSnap.docs;
 
-        // Lookup attendance record
-        final attKey = '${studentId}_$date';
-        final attRecord = db.attendancesBox.get(attKey);
-        
-        final String status = attRecord != null ? (attRecord['status'] as String) : 'ATTENDANCE';
-        final int attendanceId = attRecord != null ? 1 : 0; // Simulated indicator if record exists
+        var activeStudents = allStudents.where((doc) => doc.data()['isActive'] == true).toList();
+        if (gradeFilter != null) {
+          activeStudents = activeStudents.where((doc) => doc.data()['grade'] == gradeFilter).toList();
+        }
+        activeStudents.sort((a, b) => (a.data()['name'] as String).compareTo(b.data()['name'] as String));
 
-        list.add(StudentAttendanceItem(
-          studentId: studentId,
-          studentName: studentName,
-          school: school,
-          grade: grade,
-          className: className,
-          attendanceId: attendanceId,
-          date: date,
-          status: status,
-        ));
-      }
+        final targetTimestamp = _parseDate(date);
 
-      return list;
-    });
+        for (final doc in activeStudents) {
+          final s = doc.data();
+          final studentId = doc.id; // String ID
+          final studentName = s['name'] as String? ?? '';
+          final school = s['school'] as String? ?? '';
+          final grade = s['grade'] as int? ?? 1;
+          final className = s['className'] as String? ?? '';
+
+          final attRecords = allAttendances.where((aDoc) {
+            final a = aDoc.data();
+            final aStudentId = a['studentId'] as String;
+            final aDateTs = a['date'] as Timestamp?;
+            return aStudentId == studentId && aDateTs != null && aDateTs.seconds == targetTimestamp.seconds;
+          }).toList();
+
+          if (attRecords.isEmpty) {
+            list.add(StudentAttendanceItem(
+              studentId: studentId,
+              studentName: studentName,
+              school: school,
+              grade: grade,
+              className: className,
+              attendanceId: null,
+              date: date,
+              status: 'ABSENT',
+            ));
+          } else {
+            final attDoc = attRecords.first;
+            final att = attDoc.data();
+            list.add(StudentAttendanceItem(
+              studentId: studentId,
+              studentName: studentName,
+              school: school,
+              grade: grade,
+              className: className,
+              attendanceId: attDoc.id,
+              date: date,
+              status: att['status'] as String? ?? 'ABSENT',
+            ));
+          }
+        }
+
+        return list;
+      },
+    );
   }
 
   @override
   Future<void> updateAttendanceStatus({
-    required int studentId,
+    required String studentId,
     required String date,
     required String status,
-    int? attendanceId,
+    String? attendanceId,
   }) async {
-    final attKey = '${studentId}_$date';
-    await db.attendancesBox.put(attKey, {
-      'student_id': studentId,
-      'date': date,
-      'status': status,
-    });
+    final targetTimestamp = _parseDate(date);
+    if (attendanceId != null) {
+      await FirebaseFirestore.instance.collection('attendances').doc(attendanceId).update({
+        'status': status,
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+    } else {
+      final query = await FirebaseFirestore.instance
+          .collection('attendances')
+          .where('studentId', isEqualTo: studentId)
+          .where('date', isEqualTo: targetTimestamp)
+          .get();
+
+      if (query.docs.isNotEmpty) {
+        for (final doc in query.docs) {
+          await doc.reference.update({
+            'status': status,
+            'updatedAt': FieldValue.serverTimestamp(),
+          });
+        }
+      } else {
+        await FirebaseFirestore.instance.collection('attendances').add({
+          'studentId': studentId,
+          'date': targetTimestamp,
+          'status': status,
+          'createdAt': FieldValue.serverTimestamp(),
+          'updatedAt': FieldValue.serverTimestamp(),
+        });
+      }
+    }
   }
 
   @override
   Future<void> markAllAsPresent(String date, {int? gradeFilter}) async {
-    final allStudents = db.studentsBox.values.toList();
-    var activeStudents = allStudents.where((s) => s['is_active'] == true).toList();
+    final targetTimestamp = _parseDate(date);
+    final studentsSnap = await FirebaseFirestore.instance.collection('students').get();
+    var targets = studentsSnap.docs.where((doc) => doc.data()['isActive'] == true).toList();
     if (gradeFilter != null) {
-      activeStudents = activeStudents.where((s) => s['grade'] == gradeFilter).toList();
+      targets = targets.where((doc) => doc.data()['grade'] == gradeFilter).toList();
     }
 
-    final Map<String, Map<String, dynamic>> batch = {};
-    for (final s in activeStudents) {
-      final studentId = s['id'] as int;
-      final attKey = '${studentId}_$date';
-      batch[attKey] = {
-        'student_id': studentId,
-        'date': date,
-        'status': 'ATTENDANCE',
-      };
-    }
+    for (final doc in targets) {
+      final studentId = doc.id;
+      final query = await FirebaseFirestore.instance
+          .collection('attendances')
+          .where('studentId', isEqualTo: studentId)
+          .where('date', isEqualTo: targetTimestamp)
+          .get();
 
-    if (batch.isNotEmpty) {
-      await db.attendancesBox.putAll(batch);
+      if (query.docs.isNotEmpty) {
+        for (final attDoc in query.docs) {
+          await attDoc.reference.update({
+            'status': 'ATTENDANCE',
+            'updatedAt': FieldValue.serverTimestamp(),
+          });
+        }
+      } else {
+        await FirebaseFirestore.instance.collection('attendances').add({
+          'studentId': studentId,
+          'date': targetTimestamp,
+          'status': 'ATTENDANCE',
+          'createdAt': FieldValue.serverTimestamp(),
+          'updatedAt': FieldValue.serverTimestamp(),
+        });
+      }
     }
   }
 }

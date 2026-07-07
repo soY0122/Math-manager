@@ -1,23 +1,20 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../database/database_provider.dart';
-import '../database/database.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 final themeModeProvider = StateNotifierProvider<ThemeModeNotifier, ThemeMode>((ref) {
-  final db = ref.watch(databaseProvider);
-  return ThemeModeNotifier(db);
+  return ThemeModeNotifier();
 });
 
 class ThemeModeNotifier extends StateNotifier<ThemeMode> {
-  final AppDatabase db;
-
-  ThemeModeNotifier(this.db) : super(ThemeMode.light) {
+  ThemeModeNotifier() : super(ThemeMode.light) {
     _loadTheme();
   }
 
-  void _loadTheme() {
+  void _loadTheme() async {
     try {
-      final savedTheme = db.settingsBox.get('themeMode', defaultValue: 'light') as String;
+      final prefs = await SharedPreferences.getInstance();
+      final savedTheme = prefs.getString('themeMode') ?? 'light';
       switch (savedTheme) {
         case 'dark':
           state = ThemeMode.dark;
@@ -36,7 +33,8 @@ class ThemeModeNotifier extends StateNotifier<ThemeMode> {
     state = mode;
     String val = mode == ThemeMode.dark ? 'dark' : 'light';
     try {
-      await db.settingsBox.put('themeMode', val);
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('themeMode', val);
     } catch (_) {}
   }
 }

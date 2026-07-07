@@ -1,5 +1,5 @@
 class ScheduleItem {
-  final int id;
+  final String id;
   final String title;
   final String date; // YYYY-MM-DD
   final String type; // 'EXAM', 'LEAVE', 'CONSULT'
@@ -29,7 +29,7 @@ class GradeStats {
 }
 
 class RankingItem {
-  final int studentId;
+  final String studentId;
   final String name;
   final int grade;
   final String className;

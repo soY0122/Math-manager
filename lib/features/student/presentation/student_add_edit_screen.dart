@@ -8,7 +8,7 @@ import '../../../core/widgets/math_text_field.dart';
 import '../../../core/widgets/math_loader.dart';
 
 class StudentAddEditScreen extends ConsumerStatefulWidget {
-  final int? studentId;
+  final String? studentId;
 
   const StudentAddEditScreen({
     super.key,
@@ -153,11 +153,10 @@ class _StudentAddEditScreenState extends ConsumerState<StudentAddEditScreen> {
                 // Parent Contact
                 MathTextField(
                   controller: _phoneController,
-                  labelText: '학부모 연락처 *',
+                  labelText: '학부모 연락처 (선택)',
                   hintText: '숫자와 하이픈만 입력하세요 (예: 010-1234-5678)',
                   keyboardType: TextInputType.phone,
-                  validator: (val) =>
-                      (val == null || val.trim().isEmpty) ? '학부모 연락처를 입력해주세요.' : null,
+                  validator: null,
                 ),
                 const SizedBox(height: 16),
 

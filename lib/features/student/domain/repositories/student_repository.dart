@@ -3,9 +3,9 @@ import '../models/student_detail_data.dart';
 
 abstract class StudentRepository {
   Stream<List<StudentStats>> watchStudents({String? search, int? gradeFilter});
-  Stream<StudentDetailData> watchStudentDetail(int studentId);
+  Stream<StudentDetailData> watchStudentDetail(String studentId);
   
-  Future<int> addStudent({
+  Future<String> addStudent({
     required String name,
     String? photoPath,
     required String school,
@@ -18,7 +18,7 @@ abstract class StudentRepository {
   });
 
   Future<void> updateStudent({
-    required int id,
+    required String id,
     required String name,
     String? photoPath,
     required String school,
@@ -30,9 +30,9 @@ abstract class StudentRepository {
     required bool isActive,
   });
 
-  Future<void> deleteStudent(int id);
-  Future<void> updateStudentMemo(int id, String memo);
-  Future<StudentBackup> deleteStudentWithBackup(int id);
+  Future<void> deleteStudent(String id);
+  Future<void> updateStudentMemo(String id, String memo);
+  Future<StudentBackup> deleteStudentWithBackup(String id);
   Future<void> restoreStudentBackup(StudentBackup backup);
 }
 

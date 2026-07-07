@@ -1,17 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../../../../core/database/database_provider.dart';
 import '../../../../core/theme/theme_provider.dart';
 import 'providers/settings_providers.dart';
 import '../domain/models/settings_models.dart';
 import '../../../core/widgets/math_card.dart';
 import '../../../core/widgets/math_loader.dart';
 import 'package:table_calendar/table_calendar.dart';
-
-final autoBackupEnabledProvider = StateProvider<bool>((ref) {
-  final db = ref.watch(databaseProvider);
-  return db.settingsBox.get('auto_backup_enabled', defaultValue: false) as bool;
-});
+import 'package:intl/intl.dart';
 
 class SettingsScreen extends ConsumerWidget {
   const SettingsScreen({super.key});
@@ -92,6 +87,7 @@ class _ScheduleCalendarTabState extends ConsumerState<_ScheduleCalendarTab> {
                 color: isDark ? theme.colorScheme.surface : const Color(0xFFF8FAFC),
                 padding: const EdgeInsets.only(bottom: 12.0),
                 child: TableCalendar(
+                  locale: 'ko_KR',
                   firstDay: DateTime.utc(2020, 1, 1),
                   lastDay: DateTime.utc(2030, 12, 31),
                   focusedDay: selectedDate,
@@ -109,9 +105,24 @@ class _ScheduleCalendarTabState extends ConsumerState<_ScheduleCalendarTab> {
                       _calendarFormat = format;
                     });
                   },
-                  headerStyle: const HeaderStyle(
+                  availableCalendarFormats: const {
+                    CalendarFormat.month: '월간',
+                    CalendarFormat.twoWeeks: '2주간',
+                    CalendarFormat.week: '주간',
+                  },
+                  daysOfWeekStyle: DaysOfWeekStyle(
+                    dowTextFormatter: (date, locale) {
+                      final weekday = date.weekday;
+                      const days = ['월', '화', '수', '목', '금', '토', '일'];
+                      return days[weekday - 1];
+                    },
+                  ),
+                  headerStyle: HeaderStyle(
                     formatButtonVisible: true,
                     titleCentered: true,
+                    titleTextFormatter: (date, locale) => DateFormat('yyyy년 M월', 'ko_KR').format(date),
+                    leftChevronIcon: Icon(Icons.chevron_left, color: theme.colorScheme.primary),
+                    rightChevronIcon: Icon(Icons.chevron_right, color: theme.colorScheme.primary),
                   ),
                   calendarStyle: CalendarStyle(
                     selectedDecoration: BoxDecoration(
@@ -259,7 +270,7 @@ class _ScheduleCalendarTabState extends ConsumerState<_ScheduleCalendarTab> {
     );
   }
 
-  void _deleteSchedule(int id) async {
+  void _deleteSchedule(String id) async {
     await ref.read(settingsRepositoryProvider).deleteSchedule(id);
     ref.invalidate(dateSchedulesStreamProvider);
     ref.invalidate(allSchedulesStreamProvider);
@@ -581,34 +592,6 @@ class _SystemSettingsTab extends ConsumerWidget {
                     ),
                   ),
                   const Divider(height: 1),
-                  ListTile(
-                    leading: const Icon(Icons.autorenew),
-                    title: const Text('자동 백업'),
-                    subtitle: const Text('앱을 닫을 때 데이터가 변경된 경우 매일 자동 백업'),
-                    trailing: Switch(
-                      value: ref.watch(autoBackupEnabledProvider),
-                      onChanged: (val) async {
-                        ref.read(autoBackupEnabledProvider.notifier).state = val;
-                        final db = ref.read(databaseProvider);
-                        await db.settingsBox.put('auto_backup_enabled', val);
-                      },
-                    ),
-                  ),
-                  const Divider(height: 1),
-                  ListTile(
-                    leading: const Icon(Icons.backup_outlined),
-                    title: const Text('데이터 백업'),
-                    subtitle: const Text('현재 데이터베이스를 로컬 백업 파일로 보관'),
-                    onTap: () => _performBackup(context, ref),
-                  ),
-                  const Divider(height: 1),
-                  ListTile(
-                    leading: const Icon(Icons.restore_outlined),
-                    title: const Text('데이터 복구'),
-                    subtitle: const Text('백업 파일에서 데이터베이스를 복원'),
-                    onTap: () => _confirmRestore(context, ref),
-                  ),
-                  const Divider(height: 1),
                   const ListTile(
                     leading: Icon(Icons.info_outline),
                     title: Text('앱 버전 정보'),
@@ -621,144 +604,6 @@ class _SystemSettingsTab extends ConsumerWidget {
         ),
       ),
     );
-  }
-
-  Future<void> _performBackup(BuildContext context, WidgetRef ref) async {
-    final scaffoldMessenger = ScaffoldMessenger.of(context);
-    try {
-      final db = ref.read(databaseProvider);
-      
-      // Copy all box contents into backupBox
-      await db.backupBox.put('students', db.studentsBox.values.toList());
-      await db.backupBox.put('attendances', db.attendancesBox.values.toList());
-      await db.backupBox.put('homeworks', db.homeworksBox.values.toList());
-      await db.backupBox.put('exams', db.examsBox.values.toList());
-      await db.backupBox.put('exam_records', db.examRecordsBox.values.toList());
-      await db.backupBox.put('schedules', db.schedulesBox.values.toList());
-      
-      scaffoldMessenger.showSnackBar(
-        const SnackBar(content: Text('데이터베이스 백업이 완료되었습니다. (로컬 브라우저 저장소)')),
-      );
-    } catch (e) {
-      scaffoldMessenger.showSnackBar(
-        SnackBar(content: Text('백업 중 오류 발생: $e')),
-      );
-    }
-  }
-
-  void _confirmRestore(BuildContext context, WidgetRef ref) {
-    showDialog(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: const Text('데이터 복구'),
-          content: const Text('백업 파일에서 복구하시겠습니까?\n현재 저장된 모든 데이터가 백업 시점의 데이터로 덮어쓰기됩니다.'),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('취소'),
-            ),
-            TextButton(
-              onPressed: () async {
-                Navigator.pop(context); // Close confirm dialog
-                await _performRestore(context, ref);
-              },
-              style: TextButton.styleFrom(foregroundColor: const Color(0xFFE53935)),
-              child: const Text('복구 진행'),
-            ),
-          ],
-        );
-      },
-    );
-  }
-
-  Future<void> _performRestore(BuildContext context, WidgetRef ref) async {
-    final scaffoldMessenger = ScaffoldMessenger.of(context);
-    try {
-      final db = ref.read(databaseProvider);
-      
-      final students = db.backupBox.get('students');
-      if (students == null) {
-        scaffoldMessenger.showSnackBar(
-          const SnackBar(content: Text('백업 데이터를 찾을 수 없습니다. 먼저 백업을 실행해주세요.')),
-        );
-        return;
-      }
-      
-      // Restore all boxes
-      await db.studentsBox.clear();
-      for (final s in (students as List)) {
-        await db.studentsBox.put(s['id'], Map<String, dynamic>.from(s));
-      }
-      
-      final attendances = db.backupBox.get('attendances') as List?;
-      await db.attendancesBox.clear();
-      if (attendances != null) {
-        for (final a in attendances) {
-          final map = Map<String, dynamic>.from(a);
-          await db.attendancesBox.put('${map['student_id']}_${map['date']}', map);
-        }
-      }
-      
-      final homeworks = db.backupBox.get('homeworks') as List?;
-      await db.homeworksBox.clear();
-      if (homeworks != null) {
-        for (final h in homeworks) {
-          final map = Map<String, dynamic>.from(h);
-          await db.homeworksBox.put('${map['student_id']}_${map['date']}', map);
-        }
-      }
-      
-      final exams = db.backupBox.get('exams') as List?;
-      await db.examsBox.clear();
-      if (exams != null) {
-        for (final e in exams) {
-          final map = Map<String, dynamic>.from(e);
-          await db.examsBox.put(map['id'], map);
-        }
-      }
-      
-      final examRecords = db.backupBox.get('exam_records') as List?;
-      await db.examRecordsBox.clear();
-      if (examRecords != null) {
-        for (final er in examRecords) {
-          final map = Map<String, dynamic>.from(er);
-          await db.examRecordsBox.put('${map['exam_id']}_${map['student_id']}', map);
-        }
-      }
-      
-      final schedules = db.backupBox.get('schedules') as List?;
-      await db.schedulesBox.clear();
-      if (schedules != null) {
-        for (final s in schedules) {
-          final map = Map<String, dynamic>.from(s);
-          await db.schedulesBox.put(map['id'], map);
-        }
-      }
-
-      if (context.mounted) {
-        showDialog(
-          context: context,
-          barrierDismissible: false,
-          builder: (context) {
-            return AlertDialog(
-              title: const Text('복구 성공'),
-              content: const Text('데이터가 성공적으로 복구되었습니다.\n적용을 위해 앱을 완전히 다시 실행해 주세요.'),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(context),
-                  child: const Text('확인'),
-                ),
-              ],
-            );
-          },
-        );
-      }
-    } catch (e) {
-      scaffoldMessenger.showSnackBar(
-        SnackBar(content: Text('복구 중 오류 발생: $e')),
-      );
-    }
   }
 }
 

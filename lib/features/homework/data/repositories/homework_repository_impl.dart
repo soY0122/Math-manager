@@ -1,120 +1,265 @@
 import 'dart:async';
-import 'package:hive_flutter/hive_flutter.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:rxdart/rxdart.dart';
 import '../../domain/models/student_homework_item.dart';
 import '../../domain/repositories/homework_repository.dart';
-import '../../../../core/database/database.dart';
 
 class HomeworkRepositoryImpl implements HomeworkRepository {
-  final AppDatabase db;
+  HomeworkRepositoryImpl();
 
-  HomeworkRepositoryImpl(this.db);
 
-  Stream<void> _watchMulti(List<Box> boxes) async* {
-    yield null; // Initial trigger
-    final controller = StreamController<void>();
-    final subs = <StreamSubscription>[];
-    for (final box in boxes) {
-      subs.add(box.watch().listen((_) {
-        if (!controller.isClosed) controller.add(null);
-      }));
-    }
-    controller.onCancel = () {
-      for (final s in subs) {
-        s.cancel();
-      }
-      controller.close();
-    };
-    yield* controller.stream;
+
+  Timestamp _parseDate(String dateStr) {
+    final parsed = DateTime.tryParse(dateStr) ?? DateTime.now();
+    return Timestamp.fromDate(DateTime(parsed.year, parsed.month, parsed.day));
   }
 
   @override
   Stream<List<StudentHomeworkItem>> watchHomeworkForDate(String date, {int? gradeFilter}) {
-    return _watchMulti([db.studentsBox, db.homeworksBox]).asyncMap((_) async {
-      final List<StudentHomeworkItem> list = [];
+    final studentsStream = FirebaseFirestore.instance.collection('students').snapshots();
+    final homeworksStream = FirebaseFirestore.instance.collection('homeworks').snapshots();
 
-      final allStudents = db.studentsBox.values.toList();
-      var activeStudents = allStudents.where((s) => s['is_active'] == true).toList();
-      if (gradeFilter != null) {
-        activeStudents = activeStudents.where((s) => s['grade'] == gradeFilter).toList();
-      }
-      activeStudents.sort((a, b) => (a['name'] as String).compareTo(b['name'] as String));
+    return Rx.combineLatest2<
+        QuerySnapshot<Map<String, dynamic>>,
+        QuerySnapshot<Map<String, dynamic>>,
+        List<StudentHomeworkItem>>(
+      studentsStream,
+      homeworksStream,
+      (studentsSnap, homeworksSnap) {
+        final List<StudentHomeworkItem> list = [];
 
-      for (final s in activeStudents) {
-        final studentId = s['id'] as int;
-        final studentName = s['name'] as String;
-        final school = s['school'] as String;
-        final grade = s['grade'] as int;
-        final className = s['class_name'] as String;
+        final allStudents = studentsSnap.docs;
+        final allHomeworks = homeworksSnap.docs;
 
-        // Lookup homework record
-        final hwKey = '${studentId}_$date';
-        final hwRecord = db.homeworksBox.get(hwKey);
-        
-        final String status = hwRecord != null ? (hwRecord['status'] as String) : 'INCOMPLETE';
-        final String title = hwRecord != null ? (hwRecord['title'] as String) : '오늘의 과제';
-        final String memo = hwRecord != null ? (hwRecord['memo'] as String? ?? '') : '';
-        final int homeworkId = hwRecord != null ? 1 : 0; // Simulated indicator
+        var activeStudents = allStudents.where((doc) => doc.data()['isActive'] == true).toList();
+        if (gradeFilter != null) {
+          activeStudents = activeStudents.where((doc) => doc.data()['grade'] == gradeFilter).toList();
+        }
+        activeStudents.sort((a, b) => (a.data()['name'] as String).compareTo(b.data()['name'] as String));
 
-        list.add(StudentHomeworkItem(
-          studentId: studentId,
-          studentName: studentName,
-          school: school,
-          grade: grade,
-          className: className,
-          homeworkId: homeworkId,
-          title: title,
-          date: date,
-          status: status,
-          memo: memo,
-        ));
-      }
+        final targetTimestamp = _parseDate(date);
 
-      return list;
-    });
+        for (final doc in activeStudents) {
+          final s = doc.data();
+          final studentId = doc.id; // String ID
+          final studentName = s['name'] as String? ?? '';
+          final school = s['school'] as String? ?? '';
+          final grade = s['grade'] as int? ?? 1;
+          final className = s['className'] as String? ?? '';
+
+          final studentHwRecords = allHomeworks.where((hDoc) {
+            final h = hDoc.data();
+            final hStudentId = h['studentId'] as String;
+            final hDateTs = h['date'] as Timestamp?;
+            return hStudentId == studentId && hDateTs != null && hDateTs.seconds == targetTimestamp.seconds;
+          }).toList();
+
+          if (studentHwRecords.isEmpty) {
+            final dateHws = allHomeworks.where((hDoc) {
+              final h = hDoc.data();
+              final hDateTs = h['date'] as Timestamp?;
+              return hDateTs != null && hDateTs.seconds == targetTimestamp.seconds;
+            }).toList();
+
+            final uniqueTitles = dateHws.map((hDoc) => hDoc.data()['title'] as String).toSet().toList();
+
+            for (final title in uniqueTitles) {
+              final isTargetGrade = dateHws.any((hDoc) {
+                final h = hDoc.data();
+                if (h['title'] == title) {
+                  final otherStudentId = h['studentId'] as String;
+                  final otherStudentDoc = allStudents.where((stDoc) => stDoc.id == otherStudentId).firstOrNull;
+                  if (otherStudentDoc != null && (otherStudentDoc.data() as Map<String, dynamic>)['grade'] == grade) {
+                    return true;
+                  }
+                }
+                return false;
+              });
+
+              if (isTargetGrade || gradeFilter == null) {
+                list.add(StudentHomeworkItem(
+                  studentId: studentId,
+                  studentName: studentName,
+                  school: school,
+                  grade: grade,
+                  className: className,
+                  homeworkId: null,
+                  title: title,
+                  date: date,
+                  status: 'INCOMPLETE',
+                  memo: '',
+                ));
+              }
+            }
+          } else {
+            for (final hwDoc in studentHwRecords) {
+              final hw = hwDoc.data();
+              list.add(StudentHomeworkItem(
+                studentId: studentId,
+                studentName: studentName,
+                school: school,
+                grade: grade,
+                className: className,
+                homeworkId: hwDoc.id,
+                title: hw['title'] as String? ?? '',
+                date: date,
+                status: hw['status'] as String? ?? 'INCOMPLETE',
+                memo: hw['memo'] as String? ?? '',
+              ));
+            }
+          }
+        }
+
+        return list;
+      },
+    );
   }
 
   @override
   Future<void> updateHomeworkStatus({
-    required int studentId,
+    required String studentId,
     required String date,
     required String status,
     required String title,
     String? memo,
-    int? homeworkId,
+    String? homeworkId,
   }) async {
-    final hwKey = '${studentId}_$date';
-    await db.homeworksBox.put(hwKey, {
-      'student_id': studentId,
-      'date': date,
-      'status': status,
-      'title': title,
-      'memo': memo ?? '',
-    });
+    final targetTimestamp = _parseDate(date);
+    if (homeworkId != null) {
+      await FirebaseFirestore.instance.collection('homeworks').doc(homeworkId).update({
+        'status': status,
+        'memo': memo ?? '',
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+    } else {
+      final query = await FirebaseFirestore.instance
+          .collection('homeworks')
+          .where('studentId', isEqualTo: studentId)
+          .where('title', isEqualTo: title)
+          .where('date', isEqualTo: targetTimestamp)
+          .get();
+
+      if (query.docs.isNotEmpty) {
+        for (final doc in query.docs) {
+          await doc.reference.update({
+            'status': status,
+            'memo': memo ?? '',
+            'updatedAt': FieldValue.serverTimestamp(),
+          });
+        }
+      } else {
+        await FirebaseFirestore.instance.collection('homeworks').add({
+          'studentId': studentId,
+          'date': targetTimestamp,
+          'status': status,
+          'title': title,
+          'memo': memo ?? '',
+          'createdAt': FieldValue.serverTimestamp(),
+          'updatedAt': FieldValue.serverTimestamp(),
+        });
+      }
+    }
   }
 
   @override
   Future<void> markAllAsCompleted(String date, String title, {int? gradeFilter}) async {
-    final allStudents = db.studentsBox.values.toList();
-    var activeStudents = allStudents.where((s) => s['is_active'] == true).toList();
+    final targetTimestamp = _parseDate(date);
+    final studentsSnap = await FirebaseFirestore.instance.collection('students').get();
+    var targets = studentsSnap.docs.where((doc) => doc.data()['isActive'] == true).toList();
     if (gradeFilter != null) {
-      activeStudents = activeStudents.where((s) => s['grade'] == gradeFilter).toList();
+      targets = targets.where((doc) => doc.data()['grade'] == gradeFilter).toList();
     }
 
-    final Map<String, Map<String, dynamic>> batch = {};
-    for (final s in activeStudents) {
-      final studentId = s['id'] as int;
-      final hwKey = '${studentId}_$date';
-      batch[hwKey] = {
-        'student_id': studentId,
-        'date': date,
-        'status': 'COMPLETED',
-        'title': title,
-        'memo': '',
-      };
+    for (final doc in targets) {
+      final studentId = doc.id;
+      final query = await FirebaseFirestore.instance
+          .collection('homeworks')
+          .where('studentId', isEqualTo: studentId)
+          .where('title', isEqualTo: title)
+          .where('date', isEqualTo: targetTimestamp)
+          .get();
+
+      if (query.docs.isNotEmpty) {
+        for (final hwDoc in query.docs) {
+          await hwDoc.reference.update({
+            'status': 'COMPLETED',
+            'updatedAt': FieldValue.serverTimestamp(),
+          });
+        }
+      } else {
+        await FirebaseFirestore.instance.collection('homeworks').add({
+          'studentId': studentId,
+          'date': targetTimestamp,
+          'status': 'COMPLETED',
+          'title': title,
+          'memo': '',
+          'createdAt': FieldValue.serverTimestamp(),
+          'updatedAt': FieldValue.serverTimestamp(),
+        });
+      }
+    }
+  }
+
+  @override
+  Future<void> addHomeworkAssignment({
+    required String date,
+    required String title,
+    required int? gradeFilter,
+  }) async {
+    final targetTimestamp = _parseDate(date);
+    final studentsSnap = await FirebaseFirestore.instance.collection('students').get();
+    var targets = studentsSnap.docs.where((doc) => doc.data()['isActive'] == true).toList();
+    if (gradeFilter != null) {
+      targets = targets.where((doc) => doc.data()['grade'] == gradeFilter).toList();
     }
 
-    if (batch.isNotEmpty) {
-      await db.homeworksBox.putAll(batch);
+    for (final doc in targets) {
+      final studentId = doc.id;
+      final query = await FirebaseFirestore.instance
+          .collection('homeworks')
+          .where('studentId', isEqualTo: studentId)
+          .where('title', isEqualTo: title)
+          .where('date', isEqualTo: targetTimestamp)
+          .get();
+
+      if (query.docs.isEmpty) {
+        await FirebaseFirestore.instance.collection('homeworks').add({
+          'studentId': studentId,
+          'date': targetTimestamp,
+          'title': title,
+          'status': 'INCOMPLETE',
+          'memo': '',
+          'createdAt': FieldValue.serverTimestamp(),
+          'updatedAt': FieldValue.serverTimestamp(),
+        });
+      }
+    }
+  }
+
+  @override
+  Future<void> deleteHomeworkAssignment({
+    required String date,
+    required String title,
+    required int? gradeFilter,
+  }) async {
+    final targetTimestamp = _parseDate(date);
+
+    final query = await FirebaseFirestore.instance
+        .collection('homeworks')
+        .where('title', isEqualTo: title)
+        .where('date', isEqualTo: targetTimestamp)
+        .get();
+
+    for (final doc in query.docs) {
+      if (gradeFilter != null) {
+        final studentId = doc.data()['studentId'] as String;
+        final stDoc = await FirebaseFirestore.instance.collection('students').doc(studentId).get();
+        if (stDoc.exists && stDoc.data()?['grade'] == gradeFilter) {
+          await doc.reference.delete();
+        }
+      } else {
+        await doc.reference.delete();
+      }
     }
   }
 }

@@ -8,7 +8,6 @@ import 'widgets/ai_insights.dart';
 import 'widgets/leaderboard.dart';
 import 'widgets/recent_activity.dart';
 import '../../../core/widgets/math_loader.dart';
-import 'package:intl/intl.dart';
 
 class HomeScreen extends ConsumerWidget {
   const HomeScreen({super.key});
@@ -23,8 +22,17 @@ class HomeScreen extends ConsumerWidget {
         title: const Text('대시보드'),
         actions: [
           IconButton(
-            icon: const Icon(Icons.notifications_none_outlined),
-            onPressed: () {},
+            icon: const Icon(Icons.save_outlined),
+            onPressed: () {
+              ScaffoldMessenger.of(context).clearSnackBars();
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('모든 데이터가 안전하게 저장되었습니다.'),
+                  duration: Duration(seconds: 2),
+                ),
+              );
+            },
+            tooltip: '데이터 저장',
           ),
           const SizedBox(width: 8),
         ],

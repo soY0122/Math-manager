@@ -8,14 +8,14 @@ abstract class SettingsRepository {
     required String date,
     required String type,
     String? memo,
-    int? studentId,
+    String? studentId,
   });
   Future<void> updateSchedule({
-    required int id,
+    required String id,
     required String title,
     required String date,
     String? memo,
   });
-  Future<void> deleteSchedule(int id);
+  Future<void> deleteSchedule(String id);
   Stream<AcademyStats> watchAcademyStats({int? gradeFilter});
 }

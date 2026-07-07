@@ -2,17 +2,17 @@ import '../models/exam_models.dart';
 
 abstract class ExamRepository {
   Stream<List<ExamOverview>> watchExams();
-  Stream<List<StudentExamScoreItem>> watchExamScores(int examId);
-  Future<int> addExam(String title, String date, int grade);
+  Stream<List<StudentExamScoreItem>> watchExamScores(String examId);
+  Future<String> addExam(String title, String date, int grade);
   Future<void> updateExamScore({
-    required int examId,
-    required int studentId,
+    required String examId,
+    required String studentId,
     required int score,
-    int? recordId,
+    String? recordId,
   });
-  Future<void> updateExam(int id, String title, String date);
-  Future<void> deleteExam(int examId);
-  Future<ExamBackup> deleteExamWithBackup(int examId);
+  Future<void> updateExam(String id, String title, String date);
+  Future<void> deleteExam(String examId);
+  Future<ExamBackup> deleteExamWithBackup(String examId);
   Future<void> restoreExamBackup(ExamBackup backup);
 }
 

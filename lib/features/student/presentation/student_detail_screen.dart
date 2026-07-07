@@ -12,7 +12,7 @@ import '../../homework/presentation/providers/homework_providers.dart';
 import 'package:intl/intl.dart';
 
 class StudentDetailScreen extends ConsumerWidget {
-  final int studentId;
+  final String studentId;
 
   const StudentDetailScreen({
     super.key,
@@ -120,7 +120,7 @@ class StudentDetailScreen extends ConsumerWidget {
                 messenger.showSnackBar(
                   SnackBar(
                     content: Text('$studentName 학생 정보가 삭제되었습니다.'),
-                    duration: const Duration(seconds: 3),
+                    duration: const Duration(seconds: 5),
                     action: SnackBarAction(
                       label: '실행 취소',
                       onPressed: () async {
@@ -258,7 +258,7 @@ class StudentDetailScreen extends ConsumerWidget {
         ],
       ),
     );
-  }  Widget _buildAttendanceTab(BuildContext context, WidgetRef ref, int studentId, List<StudentAttendanceLog> logs) {
+  }  Widget _buildAttendanceTab(BuildContext context, WidgetRef ref, String studentId, List<StudentAttendanceLog> logs) {
     final theme = Theme.of(context);
     if (logs.isEmpty) {
       return Center(child: Text('기록된 출결이 없습니다.', style: theme.textTheme.bodyMedium));
@@ -320,7 +320,7 @@ class StudentDetailScreen extends ConsumerWidget {
                 messenger.showSnackBar(
                   SnackBar(
                     content: const Text('출결 상태가 변경되었습니다.'),
-                    duration: const Duration(seconds: 3),
+                    duration: const Duration(seconds: 5),
                     action: SnackBarAction(
                       label: '실행 취소',
                       onPressed: () async {
@@ -365,7 +365,7 @@ class StudentDetailScreen extends ConsumerWidget {
       },
     );
   }
-  Widget _buildHomeworkTab(BuildContext context, WidgetRef ref, int studentId, List<StudentHomeworkLog> logs) {
+  Widget _buildHomeworkTab(BuildContext context, WidgetRef ref, String studentId, List<StudentHomeworkLog> logs) {
     final theme = Theme.of(context);
     if (logs.isEmpty) {
       return Center(child: Text('기록된 과제가 없습니다.', style: theme.textTheme.bodyMedium));
@@ -380,13 +380,13 @@ class StudentDetailScreen extends ConsumerWidget {
 
         if (log.status == 'COMPLETED') {
           statusColor = const Color(0xFF4CAF50);
-          statusText = '○ 완료';
+          statusText = '완료';
         } else if (log.status == 'PARTIAL') {
           statusColor = const Color(0xFFFF9800);
-          statusText = '△ 일부 완료';
+          statusText = '일부 완료';
         } else {
           statusColor = const Color(0xFFF44336);
-          statusText = '× 미완료';
+          statusText = '미완료';
         }
 
         return Card(
@@ -431,7 +431,7 @@ class StudentDetailScreen extends ConsumerWidget {
                         messenger.showSnackBar(
                           SnackBar(
                             content: const Text('과제 상태가 변경되었습니다.'),
-                            duration: const Duration(seconds: 3),
+                            duration: const Duration(seconds: 5),
                             action: SnackBarAction(
                               label: '실행 취소',
                               onPressed: () async {
@@ -673,7 +673,7 @@ class StudentDetailScreen extends ConsumerWidget {
     );
   }
 
-  Widget _buildConsultingTab(BuildContext context, WidgetRef ref, int studentId, List<StudentConsultingLog> logs) {
+  Widget _buildConsultingTab(BuildContext context, WidgetRef ref, String studentId, List<StudentConsultingLog> logs) {
     final theme = Theme.of(context);
     return Column(
       children: [
@@ -766,7 +766,7 @@ class StudentDetailScreen extends ConsumerWidget {
     );
   }
 
-  void _showAddConsultingDialog(BuildContext context, WidgetRef ref, int studentId) {
+  void _showAddConsultingDialog(BuildContext context, WidgetRef ref, String studentId) {
     final titleController = TextEditingController(text: '개별 상담');
     final memoController = TextEditingController();
     final dateController = TextEditingController(text: DateFormat('yyyy-MM-dd').format(DateTime.now()));
@@ -831,7 +831,7 @@ class StudentDetailScreen extends ConsumerWidget {
     );
   }
 
-  void _showEditConsultingDialog(BuildContext context, WidgetRef ref, int studentId, StudentConsultingLog log) {
+  void _showEditConsultingDialog(BuildContext context, WidgetRef ref, String studentId, StudentConsultingLog log) {
     final titleController = TextEditingController(text: log.title);
     final memoController = TextEditingController(text: log.memo ?? '');
     final dateController = TextEditingController(text: log.date);
@@ -904,7 +904,7 @@ class StudentDetailScreen extends ConsumerWidget {
     return '$grade학년';
   }
 
-  Widget _buildQuickNavigationRow(BuildContext context, WidgetRef ref, List<int> ids) {
+  Widget _buildQuickNavigationRow(BuildContext context, WidgetRef ref, List<String> ids) {
     final idx = ids.indexOf(studentId);
     if (idx == -1) return const SizedBox.shrink();
 
@@ -957,7 +957,7 @@ class StudentDetailScreen extends ConsumerWidget {
 }
 
 class _InlineTeacherMemoEditor extends StatefulWidget {
-  final int studentId;
+  final String studentId;
   final String? initialMemo;
   final WidgetRef ref;
 
@@ -1060,7 +1060,7 @@ class _InlineTeacherMemoEditorState extends State<_InlineTeacherMemoEditor> {
 }
 
 class _InlineHomeworkMemoEditor extends StatefulWidget {
-  final int studentId;
+  final String studentId;
   final StudentHomeworkLog log;
   final WidgetRef ref;
 

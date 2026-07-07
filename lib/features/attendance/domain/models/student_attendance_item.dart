@@ -1,10 +1,10 @@
 class StudentAttendanceItem {
-  final int studentId;
+  final String studentId;
   final String studentName;
   final String school;
   final int grade;
   final String className;
-  final int? attendanceId;
+  final String? attendanceId;
   final String date; // YYYY-MM-DD
   final String status; // 'ATTENDANCE', 'LATE', 'ABSENT', 'LEAVE'
 
@@ -20,12 +20,12 @@ class StudentAttendanceItem {
   });
 
   StudentAttendanceItem copyWith({
-    int? studentId,
+    String? studentId,
     String? studentName,
     String? school,
     int? grade,
     String? className,
-    int? attendanceId,
+    String? attendanceId,
     String? date,
     String? status,
   }) {

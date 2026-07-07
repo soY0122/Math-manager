@@ -56,7 +56,7 @@ class StudentExamLog {
 }
 
 class StudentConsultingLog {
-  final int? id;
+  final String? id;
   final String title;
   final String date; // YYYY-MM-DD
   final String? memo;

@@ -55,7 +55,7 @@ class DashboardStats {
 }
 
 class GrowthLeaderboardItem {
-  final int studentId;
+  final String studentId;
   final String studentName;
   final int grade;
   final String className;

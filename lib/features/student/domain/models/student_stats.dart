@@ -1,5 +1,5 @@
 class StudentStats {
-  final int id;
+  final String id;
   final String name;
   final String? photoPath;
   final String school;

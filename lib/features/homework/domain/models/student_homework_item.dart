@@ -1,10 +1,10 @@
 class StudentHomeworkItem {
-  final int studentId;
+  final String studentId;
   final String studentName;
   final String school;
   final int grade;
   final String className;
-  final int? homeworkId;
+  final String? homeworkId;
   final String title;
   final String date; // YYYY-MM-DD
   final String status; // 'COMPLETED', 'PARTIAL', 'INCOMPLETE'
@@ -24,12 +24,12 @@ class StudentHomeworkItem {
   });
 
   StudentHomeworkItem copyWith({
-    int? studentId,
+    String? studentId,
     String? studentName,
     String? school,
     int? grade,
     String? className,
-    int? homeworkId,
+    String? homeworkId,
     String? title,
     String? date,
     String? status,

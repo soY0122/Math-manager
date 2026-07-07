@@ -6,6 +6,7 @@ import '../../../core/widgets/math_card.dart';
 import '../../../core/providers/global_providers.dart';
 import '../../../core/widgets/math_loader.dart';
 import 'package:table_calendar/table_calendar.dart';
+import 'package:intl/intl.dart';
 
 class AttendanceScreen extends ConsumerStatefulWidget {
   const AttendanceScreen({super.key});
@@ -45,6 +46,7 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> {
             color: isDark ? theme.colorScheme.surface : const Color(0xFFF8FAFC),
             padding: const EdgeInsets.only(bottom: 12.0),
             child: TableCalendar(
+              locale: 'ko_KR',
               firstDay: DateTime.utc(2020, 1, 1),
               lastDay: DateTime.utc(2030, 12, 31),
               focusedDay: selectedDate,
@@ -58,10 +60,26 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> {
                   _calendarFormat = format;
                 });
               },
+              availableCalendarFormats: const {
+                CalendarFormat.month: '월간',
+                CalendarFormat.twoWeeks: '2주간',
+                CalendarFormat.week: '주간',
+              },
+              daysOfWeekStyle: DaysOfWeekStyle(
+                dowTextFormatter: (date, locale) {
+                  final weekday = date.weekday;
+                  const days = ['월', '화', '수', '목', '금', '토', '일'];
+                  return days[weekday - 1];
+                },
+              ),
               headerStyle: HeaderStyle(
                 formatButtonVisible: true,
+                titleCentered: true,
+                titleTextFormatter: (date, locale) => DateFormat('yyyy년 M월', 'ko_KR').format(date),
+                leftChevronIcon: Icon(Icons.chevron_left, color: theme.colorScheme.primary),
+                rightChevronIcon: Icon(Icons.chevron_right, color: theme.colorScheme.primary),
                 formatButtonDecoration: BoxDecoration(
-                  border: Border.all(color: theme.colorScheme.primary.withOpacity(0.5)),
+                  border: Border.all(color: theme.colorScheme.primary.withValues(alpha: 0.5)),
                   borderRadius: BorderRadius.circular(12),
                 ),
                 formatButtonTextStyle: TextStyle(
@@ -69,7 +87,6 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> {
                   fontWeight: FontWeight.bold,
                   fontSize: 12,
                 ),
-                titleCentered: true,
               ),
               calendarStyle: CalendarStyle(
                 selectedDecoration: BoxDecoration(

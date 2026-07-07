@@ -2,12 +2,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../data/repositories/exam_repository_impl.dart';
 import '../../domain/repositories/exam_repository.dart';
 import '../../domain/models/exam_models.dart';
-import '../../../../core/database/database_provider.dart';
 import '../../../../core/providers/global_providers.dart';
 
 final examRepositoryProvider = Provider<ExamRepository>((ref) {
-  final db = ref.watch(databaseProvider);
-  return ExamRepositoryImpl(db);
+  return ExamRepositoryImpl();
 });
 
 final examSortNewestProvider = StateProvider<bool>((ref) => true);
@@ -32,7 +30,7 @@ final examsListStreamProvider = StreamProvider<List<ExamOverview>>((ref) {
   });
 });
 
-final examScoresStreamProvider = StreamProvider.family<List<StudentExamScoreItem>, int>((ref, examId) {
+final examScoresStreamProvider = StreamProvider.family<List<StudentExamScoreItem>, String>((ref, examId) {
   final repository = ref.watch(examRepositoryProvider);
   return repository.watchExamScores(examId);
 });

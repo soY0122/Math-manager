@@ -2,12 +2,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../data/repositories/settings_repository_impl.dart';
 import '../../domain/repositories/settings_repository.dart';
 import '../../domain/models/settings_models.dart';
-import '../../../../core/database/database_provider.dart';
 import '../../../../core/providers/global_providers.dart';
 
 final settingsRepositoryProvider = Provider<SettingsRepository>((ref) {
-  final db = ref.watch(databaseProvider);
-  return SettingsRepositoryImpl(db);
+  return SettingsRepositoryImpl();
 });
 
 final scheduleSelectedDateProvider = StateProvider<DateTime>((ref) => DateTime.now());

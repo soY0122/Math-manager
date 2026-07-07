@@ -38,13 +38,15 @@ final routerProvider = Provider<GoRouter>((ref) {
         path: '/grades/score-input/:id',
         parentNavigatorKey: rootNavigatorKey,
         builder: (context, state) {
-          final idStr = state.pathParameters['id'];
-          final id = int.tryParse(idStr ?? '') ?? 0;
+          final id = state.pathParameters['id'] ?? '';
           return TestScoreInputScreen(examId: id);
         },
       ),
       ShellRoute(
         navigatorKey: shellNavigatorKey,
+        observers: [
+          ClearSnackBarsNavigatorObserver(),
+        ],
         builder: (context, state, child) {
           return ScaffoldWithNavBar(child: child);
         },
@@ -73,8 +75,7 @@ final routerProvider = Provider<GoRouter>((ref) {
                 path: ':id',
                 parentNavigatorKey: rootNavigatorKey,
                 builder: (context, state) {
-                  final idStr = state.pathParameters['id'];
-                  final id = int.tryParse(idStr ?? '') ?? 0;
+                  final id = state.pathParameters['id'] ?? '';
                   return StudentDetailScreen(studentId: id);
                 },
               ),
@@ -82,8 +83,7 @@ final routerProvider = Provider<GoRouter>((ref) {
                 path: 'edit/:id',
                 parentNavigatorKey: rootNavigatorKey,
                 builder: (context, state) {
-                  final idStr = state.pathParameters['id'];
-                  final id = int.tryParse(idStr ?? '') ?? 0;
+                  final id = state.pathParameters['id'] ?? '';
                   return StudentAddEditScreen(studentId: id);
                 },
               ),
@@ -139,9 +139,11 @@ class ClearSnackBarsNavigatorObserver extends NavigatorObserver {
   }
 
   void _clearSnackBars() {
-    final context = rootNavigatorKey.currentContext;
+    final context = shellNavigatorKey.currentContext ?? rootNavigatorKey.currentContext;
     if (context != null) {
-      ScaffoldMessenger.of(context).clearSnackBars();
+      try {
+        ScaffoldMessenger.of(context).clearSnackBars();
+      } catch (_) {}
     }
   }
 }

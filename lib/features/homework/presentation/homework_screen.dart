@@ -3,7 +3,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'providers/homework_providers.dart';
 import '../domain/models/student_homework_item.dart';
 import '../../../core/widgets/math_card.dart';
-import '../../../core/providers/global_providers.dart';
 import '../../../core/widgets/math_loader.dart';
 
 class HomeworkScreen extends ConsumerStatefulWidget {
@@ -15,15 +14,6 @@ class HomeworkScreen extends ConsumerStatefulWidget {
 
 class _HomeworkScreenState extends ConsumerState<HomeworkScreen> {
   final TextEditingController _titleController = TextEditingController();
-
-  @override
-  void initState() {
-    super.initState();
-    // Synchronize text controller with provider
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _titleController.text = ref.read(homeworkAssignmentTitleProvider);
-    });
-  }
 
   @override
   void dispose() {
@@ -38,28 +28,31 @@ class _HomeworkScreenState extends ConsumerState<HomeworkScreen> {
 
     final selectedDate = ref.watch(homeworkDateProvider);
     final dateStr = selectedDate.toIso8601String().split('T')[0];
-    final assignmentTitle = ref.watch(homeworkAssignmentTitleProvider);
     final homeworkAsync = ref.watch(homeworkStreamProvider);
 
     return Scaffold(
       appBar: AppBar(
         title: const Text('과제 관리'),
         actions: [
-          TextButton.icon(
-            icon: const Icon(Icons.done_all, size: 18),
-            label: const Text('전체 완료'),
-            onPressed: () => _markAllAsCompleted(context, dateStr, assignmentTitle),
+          homeworkAsync.maybeWhen(
+            data: (list) => TextButton.icon(
+              icon: const Icon(Icons.done_all, size: 18),
+              label: const Text('전체 완료'),
+              onPressed: () => _markAllAsCompleted(context, dateStr, list),
+            ),
+            orElse: () => const SizedBox.shrink(),
           ),
           const SizedBox(width: 8),
         ],
       ),
       body: Column(
         children: [
-          // 1. Date Picker & Global Assignment Title Input Card
+          // 1. Date Picker & Add Homework Card
           Container(
             padding: const EdgeInsets.all(16.0),
             color: isDark ? theme.colorScheme.surface : const Color(0xFFF8FAFC),
             child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Row(
                   children: [
@@ -91,31 +84,89 @@ class _HomeworkScreenState extends ConsumerState<HomeworkScreen> {
                   ],
                 ),
                 const SizedBox(height: 12),
-                TextField(
-                  controller: _titleController,
-                  decoration: const InputDecoration(
-                    labelText: '오늘의 과제 명칭',
-                    hintText: '예: 쎈 수학 C단계 풀이 및 오답 노트',
-                    contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                
+                // Grade Selector Label & Chips
+                Text(
+                  '학년 선택',
+                  style: theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 6),
+                SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
+                    children: [
+                      _buildGradeChip(context, ref, '전체', null),
+                      ...List.generate(9, (index) {
+                        final gradeVal = index + 1;
+                        final label = gradeVal <= 6 ? '초$gradeVal' : '중${gradeVal - 6}';
+                        return Padding(
+                          padding: const EdgeInsets.only(left: 6.0),
+                          child: _buildGradeChip(context, ref, label, gradeVal),
+                        );
+                      }),
+                    ],
                   ),
-                  onChanged: (val) {
-                    ref.read(homeworkAssignmentTitleProvider.notifier).state = val;
-                  },
+                ),
+                const SizedBox(height: 12),
+
+                // Add Homework Title Input & Button
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: _titleController,
+                        decoration: const InputDecoration(
+                          labelText: '오늘의 과제 명칭',
+                          hintText: '예: 쎈 수학 C단계 풀이',
+                          contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      ),
+                      onPressed: () async {
+                        final title = _titleController.text.trim();
+                        if (title.isEmpty) return;
+                        await ref.read(homeworkRepositoryProvider).addHomeworkAssignment(
+                          date: dateStr,
+                          title: title,
+                          gradeFilter: ref.read(homeworkGradeFilterProvider),
+                        );
+                        _titleController.clear();
+                        ref.invalidate(homeworkStreamProvider);
+                      },
+                      child: const Text('추가'),
+                    ),
+                  ],
                 ),
               ],
             ),
           ),
 
-          // 2. Homework Statistics Summary
+          // 2. Homework Checklist Summary & List
           Expanded(
             child: homeworkAsync.when(
               data: (list) {
-                final total = list.length;
-                final completed = list.where((item) => item.status == 'COMPLETED').length;
-                final partial = list.where((item) => item.status == 'PARTIAL').length;
-                final incomplete = list.where((item) => item.status == 'INCOMPLETE').length;
+                final Map<String, List<StudentHomeworkItem>> grouped = {};
+                final Map<String, String> studentNames = {};
+                final Map<String, String> studentSchools = {};
+                final Map<String, int> studentGrades = {};
+                final Map<String, String> studentClasses = {};
 
-                final rate = total > 0 ? (completed + (partial * 0.5)) / total : 1.0;
+                for (final item in list) {
+                  grouped.putIfAbsent(item.studentId, () => []).add(item);
+                  studentNames[item.studentId] = item.studentName;
+                  studentSchools[item.studentId] = item.school;
+                  studentGrades[item.studentId] = item.grade;
+                  studentClasses[item.studentId] = item.className;
+                }
+
+                final studentIds = grouped.keys.toList();
+                final total = studentIds.length;
 
                 return Column(
                   children: [
@@ -124,55 +175,47 @@ class _HomeworkScreenState extends ConsumerState<HomeworkScreen> {
                       child: Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                '대상인원: $total명',
-                                style: theme.textTheme.bodyMedium?.copyWith(
-                                  color: theme.textTheme.bodyMedium?.color?.withOpacity(0.6),
-                                ),
-                              ),
-                              const SizedBox(height: 4),
-                              Text(
-                                '과제 완료율: ${(rate * 100).toStringAsFixed(0)}%',
-                                style: theme.textTheme.titleMedium?.copyWith(
-                                  fontWeight: FontWeight.bold,
-                                  color: theme.colorScheme.primary,
-                                ),
-                              ),
-                            ],
-                          ),
-                          Row(
-                            children: [
-                              _buildStatusLabel(context, label: '완료(○)', count: completed, color: const Color(0xFF4CAF50)),
-                              const SizedBox(width: 12),
-                              _buildStatusLabel(context, label: '일부(△)', count: partial, color: const Color(0xFFFF9800)),
-                              const SizedBox(width: 12),
-                              _buildStatusLabel(context, label: '미완료(×)', count: incomplete, color: const Color(0xFFEF5350)),
-                            ],
+                          Text(
+                            '대상 인원: $total명',
+                            style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
                           ),
                         ],
                       ),
                     ),
                     const Divider(height: 1),
-                    // Students List with completion toggles & inline notes
                     Expanded(
-                      child: list.isEmpty
+                      child: total == 0
                           ? Center(
                               child: Text(
-                                '재원 중인 학생이 없습니다.',
+                                '해당 학년에 등록된 과제가 없습니다.',
                                 style: theme.textTheme.bodyMedium,
                               ),
                             )
                           : ListView.builder(
                               keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
                               padding: const EdgeInsets.all(16.0),
-                              itemCount: list.length,
+                              itemCount: total,
                               itemBuilder: (context, index) {
+                                final sId = studentIds[index];
+                                final studentHws = grouped[sId] ?? [];
+                                final name = studentNames[sId] ?? '';
+                                final school = studentSchools[sId] ?? '';
+                                final grade = studentGrades[sId] ?? 1;
+                                final className = studentClasses[sId] ?? '';
+
                                 return Padding(
+                                  key: ValueKey('homework_student_$sId'),
                                   padding: const EdgeInsets.only(bottom: 12.0),
-                                  child: _buildHomeworkItemCard(context, list[index], assignmentTitle),
+                                  child: _buildStudentHomeworkCard(
+                                    context,
+                                    studentId: sId,
+                                    name: name,
+                                    school: school,
+                                    grade: grade,
+                                    className: className,
+                                    hws: studentHws,
+                                    dateStr: dateStr,
+                                  ),
                                 );
                               },
                             ),
@@ -189,186 +232,186 @@ class _HomeworkScreenState extends ConsumerState<HomeworkScreen> {
     );
   }
 
-  Widget _buildStatusLabel(
-    BuildContext context, {
-    required String label,
-    required int count,
-    required Color color,
-  }) {
-    final theme = Theme.of(context);
-    return Column(
-      children: [
-        Text(
-          label,
-          style: theme.textTheme.bodySmall?.copyWith(
-            color: theme.textTheme.bodySmall?.color?.withOpacity(0.5),
-            fontSize: 11,
-          ),
-        ),
-        const SizedBox(height: 4),
-        Text(
-          '$count',
-          style: theme.textTheme.titleMedium?.copyWith(
-            fontWeight: FontWeight.bold,
-            color: color,
-          ),
-        ),
-      ],
+  Widget _buildGradeChip(BuildContext context, WidgetRef ref, String label, int? value) {
+    final selectedGrade = ref.watch(homeworkGradeFilterProvider);
+    final isSelected = selectedGrade == value;
+
+    return ChoiceChip(
+      label: Text(label),
+      selected: isSelected,
+      onSelected: (selected) {
+        if (selected) {
+          ref.read(homeworkGradeFilterProvider.notifier).state = value;
+        }
+      },
     );
   }
 
-  Widget _buildHomeworkItemCard(BuildContext context, StudentHomeworkItem item, String globalTitle) {
+  Widget _buildStudentHomeworkCard(
+    BuildContext context, {
+    required String studentId,
+    required String name,
+    required String school,
+    required int grade,
+    required String className,
+    required List<StudentHomeworkItem> hws,
+    required String dateStr,
+  }) {
     final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-
-    final TextEditingController _memoController = TextEditingController(text: item.memo);
 
     return MathCard(
       padding: const EdgeInsets.all(16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Header: Name, school, class + Status selector Row
+          // Header: Name & School
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Text(
-                          item.studentName,
-                          style: theme.textTheme.bodyLarge?.copyWith(fontWeight: FontWeight.bold),
-                        ),
-                        const SizedBox(width: 8),
-                        Text(
-                          _formatGrade(item.grade),
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            color: theme.textTheme.bodySmall?.color?.withOpacity(0.5),
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      '${item.school} • ${item.className}',
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                        color: theme.textTheme.bodyMedium?.color?.withOpacity(0.6),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              // Status selectors (Completed ○ / Partial △ / Incomplete ×)
-              Row(
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  _buildStatusButton(
-                    context,
-                    label: '○',
-                    isSelected: item.status == 'COMPLETED',
-                    activeColor: const Color(0xFF4CAF50),
-                    onTap: () => _updateStatus(item, 'COMPLETED', globalTitle),
+                  Row(
+                    children: [
+                      Text(
+                        name,
+                        style: theme.textTheme.bodyLarge?.copyWith(fontWeight: FontWeight.bold),
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        _formatGrade(grade),
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: theme.textTheme.bodySmall?.color?.withOpacity(0.5),
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
                   ),
-                  const SizedBox(width: 6),
-                  _buildStatusButton(
-                    context,
-                    label: '△',
-                    isSelected: item.status == 'PARTIAL',
-                    activeColor: const Color(0xFFFF9800),
-                    onTap: () => _updateStatus(item, 'PARTIAL', globalTitle),
-                  ),
-                  const SizedBox(width: 6),
-                  _buildStatusButton(
-                    context,
-                    label: '×',
-                    isSelected: item.status == 'INCOMPLETE',
-                    activeColor: const Color(0xFFEF5350),
-                    onTap: () => _updateStatus(item, 'INCOMPLETE', globalTitle),
+                  const SizedBox(height: 4),
+                  Text(
+                    '$school • $className',
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: theme.textTheme.bodyMedium?.color?.withOpacity(0.6),
+                    ),
                   ),
                 ],
               ),
             ],
           ),
-          const SizedBox(height: 12),
-          // Inline Memo TextField with Save checkmark icon
-          Row(
-            children: [
-              Expanded(
-                child: Container(
-                  height: 40,
-                  decoration: BoxDecoration(
-                    color: isDark ? Colors.white.withOpacity(0.02) : Colors.grey.shade50,
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: TextFormField(
-                    controller: _memoController,
-                    style: theme.textTheme.bodyMedium?.copyWith(fontSize: 13),
-                    decoration: InputDecoration(
-                      hintText: '특이사항 메모 입력 (예: 오답 노트 미흡)',
-                      hintStyle: TextStyle(color: Colors.grey.shade400, fontSize: 13),
-                      contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                      border: InputBorder.none,
-                      enabledBorder: InputBorder.none,
-                      focusedBorder: InputBorder.none,
-                      filled: false,
-                      suffixIcon: IconButton(
-                        icon: Icon(Icons.check_circle_outline, color: theme.colorScheme.primary, size: 18),
-                        onPressed: () {
-                          _updateMemo(item, _memoController.text.trim(), globalTitle);
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: Text('${item.studentName} 메모를 저장했습니다.'),
-                              duration: const Duration(seconds: 1),
-                            ),
-                          );
-                        },
+          const Divider(height: 16),
+          // Checklist of homework items with three-state status badges
+          ...hws.map((hw) {
+            return Padding(
+              padding: const EdgeInsets.symmetric(vertical: 4.0),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      hw.title,
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        decoration: hw.status == 'COMPLETED' ? TextDecoration.lineThrough : null,
+                        color: hw.status == 'COMPLETED' ? Colors.grey : null,
                       ),
                     ),
-                    onFieldSubmitted: (val) {
-                      _updateMemo(item, val.trim(), globalTitle);
+                  ),
+                  const SizedBox(width: 8),
+                  _buildStatusBadge(
+                    context,
+                    label: '완료',
+                    isSelected: hw.status == 'COMPLETED',
+                    color: const Color(0xFF4CAF50),
+                    onTap: () async {
+                      await ref.read(homeworkRepositoryProvider).updateHomeworkStatus(
+                        studentId: studentId,
+                        date: dateStr,
+                        status: 'COMPLETED',
+                        title: hw.title,
+                        memo: hw.memo,
+                      );
+                      ref.invalidate(homeworkStreamProvider);
                     },
                   ),
-                ),
+                  const SizedBox(width: 4),
+                  _buildStatusBadge(
+                    context,
+                    label: '일부',
+                    isSelected: hw.status == 'PARTIAL',
+                    color: const Color(0xFFFF9800),
+                    onTap: () async {
+                      await ref.read(homeworkRepositoryProvider).updateHomeworkStatus(
+                        studentId: studentId,
+                        date: dateStr,
+                        status: 'PARTIAL',
+                        title: hw.title,
+                        memo: hw.memo,
+                      );
+                      ref.invalidate(homeworkStreamProvider);
+                    },
+                  ),
+                  const SizedBox(width: 4),
+                  _buildStatusBadge(
+                    context,
+                    label: '미완료',
+                    isSelected: hw.status == 'INCOMPLETE',
+                    color: const Color(0xFFEF5350),
+                    onTap: () async {
+                      await ref.read(homeworkRepositoryProvider).updateHomeworkStatus(
+                        studentId: studentId,
+                        date: dateStr,
+                        status: 'INCOMPLETE',
+                        title: hw.title,
+                        memo: hw.memo,
+                      );
+                      ref.invalidate(homeworkStreamProvider);
+                    },
+                  ),
+                  const SizedBox(width: 4),
+                  IconButton(
+                    icon: const Icon(Icons.delete_outline, color: Color(0xFFEF5350), size: 20),
+                    onPressed: () async {
+                      await ref.read(homeworkRepositoryProvider).deleteHomeworkAssignment(
+                        date: dateStr,
+                        title: hw.title,
+                        gradeFilter: ref.read(homeworkGradeFilterProvider),
+                      );
+                      ref.invalidate(homeworkStreamProvider);
+                    },
+                  ),
+                ],
               ),
-            ],
-          ),
+            );
+          }).toList(),
         ],
       ),
     );
   }
 
-  Widget _buildStatusButton(
+  Widget _buildStatusBadge(
     BuildContext context, {
     required String label,
     required bool isSelected,
-    required Color activeColor,
+    required Color color,
     required VoidCallback onTap,
   }) {
     final theme = Theme.of(context);
     return InkWell(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(8),
+      borderRadius: BorderRadius.circular(6),
       child: Container(
-        width: 38,
-        height: 38,
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
         decoration: BoxDecoration(
-          color: isSelected ? activeColor.withOpacity(0.15) : Colors.transparent,
+          color: isSelected ? color.withOpacity(0.15) : Colors.transparent,
           border: Border.all(
-            color: isSelected ? activeColor : Colors.grey.shade300,
-            width: isSelected ? 2.0 : 1.0,
+            color: isSelected ? color : Colors.grey.shade300,
+            width: isSelected ? 1.5 : 1.0,
           ),
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(6),
         ),
-        alignment: Alignment.center,
         child: Text(
           label,
-          style: TextStyle(
-            color: isSelected ? activeColor : theme.textTheme.bodyMedium?.color?.withOpacity(0.4),
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: isSelected ? color : theme.textTheme.bodyMedium?.color?.withOpacity(0.4),
             fontWeight: FontWeight.bold,
-            fontSize: 18,
           ),
         ),
       ),
@@ -387,47 +430,23 @@ class _HomeworkScreenState extends ConsumerState<HomeworkScreen> {
     }
   }
 
-  void _updateStatus(StudentHomeworkItem item, String status, String globalTitle) {
-    ref.read(homeworkRepositoryProvider).updateHomeworkStatus(
-          studentId: item.studentId,
-          date: item.date,
-          status: status,
-          title: globalTitle.isEmpty ? item.title : globalTitle,
-          memo: item.memo,
-          homeworkId: item.homeworkId,
-        );
-  }
-
-  void _updateMemo(StudentHomeworkItem item, String memo, String globalTitle) {
-    ref.read(homeworkRepositoryProvider).updateHomeworkStatus(
-          studentId: item.studentId,
-          date: item.date,
-          status: item.status,
-          title: globalTitle.isEmpty ? item.title : globalTitle,
-          memo: memo.isEmpty ? null : memo,
-          homeworkId: item.homeworkId,
-        );
-  }
-
-  Future<void> _markAllAsCompleted(BuildContext context, String date, String title) async {
-    final scaffoldMessenger = ScaffoldMessenger.of(context);
-    final grade = ref.read(globalGradeFilterProvider);
-    try {
-      await ref.read(homeworkRepositoryProvider).markAllAsCompleted(date, title, gradeFilter: grade);
-      scaffoldMessenger.showSnackBar(
-        SnackBar(
-          content: Text(
-            grade != null 
-                ? '해당 학년의 모든 활성 학생 과제를 완료로 처리했습니다.' 
-                : '모든 활성 학생의 과제를 완료로 처리했습니다.'
-          )
-        ),
-      );
-    } catch (e) {
-      scaffoldMessenger.showSnackBar(
-        SnackBar(content: Text('일괄 과제 처리 실패: $e')),
+  void _markAllAsCompleted(BuildContext context, String date, List<StudentHomeworkItem> list) async {
+    final messenger = ScaffoldMessenger.of(context);
+    for (final item in list) {
+      await ref.read(homeworkRepositoryProvider).updateHomeworkStatus(
+        studentId: item.studentId,
+        date: date,
+        status: 'COMPLETED',
+        title: item.title,
+        memo: item.memo,
       );
     }
+    ref.invalidate(homeworkStreamProvider);
+    
+    messenger.clearSnackBars();
+    messenger.showSnackBar(
+      const SnackBar(content: Text('모든 학생의 과제가 완료 처리되었습니다.'), duration: Duration(seconds: 2)),
+    );
   }
 
   String _formatGrade(int grade) {

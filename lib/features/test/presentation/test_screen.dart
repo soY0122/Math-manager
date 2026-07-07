@@ -467,7 +467,7 @@ class TestScreen extends ConsumerWidget {
                 messenger.showSnackBar(
                   SnackBar(
                     content: Text('"${exam.title}" 시험이 삭제되었습니다.'),
-                    duration: const Duration(seconds: 3),
+                    duration: const Duration(seconds: 5),
                     action: SnackBarAction(
                       label: '실행 취소',
                       onPressed: () async {

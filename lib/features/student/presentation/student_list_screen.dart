@@ -225,13 +225,13 @@ class _StudentListScreenState extends ConsumerState<StudentListScreen> {
     final isDark = theme.brightness == Brightness.dark;
 
     // Growth Icon
-    String growthIcon = '➖';
+    String growthIcon = '-';
     Color growthColor = Colors.grey.shade600;
     if (student.growthTrend == '상승 중') {
-      growthIcon = '📈';
+      growthIcon = '▲';
       growthColor = const Color(0xFF2E7D32);
     } else if (student.growthTrend == '하락 중') {
-      growthIcon = '📉';
+      growthIcon = '▼';
       growthColor = const Color(0xFFC62828);
     }
 
@@ -336,7 +336,7 @@ class _StudentListScreenState extends ConsumerState<StudentListScreen> {
               _buildMiniStat(
                 context,
                 label: '성장도',
-                value: '$growthIcon ${student.growthTrend}',
+                value: '$growthIcon ${student.growthTrend == '유지' ? '' : (student.growthRate > 0 ? '+' : '')}${student.growthRate.toStringAsFixed(0)}%',
                 valueColor: isDark ? null : growthColor,
               ),
               _buildMiniStat(
