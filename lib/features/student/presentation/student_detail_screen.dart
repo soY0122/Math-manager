@@ -1,0 +1,1129 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
+import 'providers/student_detail_provider.dart';
+import 'providers/student_list_provider.dart';
+import '../domain/models/student_detail_data.dart';
+import '../../../core/widgets/math_card.dart';
+import '../../../core/widgets/math_loader.dart';
+import '../../settings/presentation/providers/settings_providers.dart';
+import '../../attendance/presentation/providers/attendance_providers.dart';
+import '../../homework/presentation/providers/homework_providers.dart';
+import 'package:intl/intl.dart';
+
+class StudentDetailScreen extends ConsumerWidget {
+  final int studentId;
+
+  const StudentDetailScreen({
+    super.key,
+    required this.studentId,
+  });
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final detailAsync = ref.watch(studentDetailStreamProvider(studentId));
+    final activeIdsAsync = ref.watch(sortedActiveStudentIdsProvider);
+    final theme = Theme.of(context);
+
+    return detailAsync.when(
+      data: (detail) {
+        final stats = detail.stats;
+
+        return DefaultTabController(
+          length: 5,
+          child: Scaffold(
+            appBar: AppBar(
+              title: const Text('학생 상세 정보'),
+              actions: [
+                IconButton(
+                  icon: const Icon(Icons.edit_outlined),
+                  onPressed: () => context.push('/student/edit/$studentId'),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.delete_outline, color: Color(0xFFEF5350)),
+                  onPressed: () => _showDeleteDialog(context, ref, stats.name),
+                ),
+                const SizedBox(width: 8),
+              ],
+            ),
+            body: Column(
+              children: [
+                activeIdsAsync.maybeWhen(
+                  data: (ids) => _buildQuickNavigationRow(context, ref, ids),
+                  orElse: () => const SizedBox.shrink(),
+                ),
+                // 1. Profile Header Section
+                _buildProfileHeader(context, ref, stats),
+                
+                // 2. Tab Bar
+                TabBar(
+                  isScrollable: true,
+                  tabAlignment: TabAlignment.start,
+                  labelColor: theme.colorScheme.primary,
+                  unselectedLabelColor: theme.textTheme.bodyMedium?.color?.withOpacity(0.6),
+                  indicatorColor: theme.colorScheme.primary,
+                  tabs: const [
+                    Tab(text: '출결'),
+                    Tab(text: '과제'),
+                    Tab(text: '시험'),
+                    Tab(text: 'AI 분석'),
+                    Tab(text: '상담 일지'),
+                  ],
+                ),
+                
+                // 3. Tab Bar View
+                Expanded(
+                  child: TabBarView(
+                    children: [
+                      _buildAttendanceTab(context, ref, studentId, detail.attendanceLogs),
+                      _buildHomeworkTab(context, ref, studentId, detail.homeworkLogs),
+                      _buildExamsTab(context, detail.examLogs),
+                      _buildAITab(context, detail),
+                      _buildConsultingTab(context, ref, studentId, detail.consultingLogs),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+      loading: () => const Scaffold(body: MathLoader(message: '학생 데이터를 분석하는 중...')),
+      error: (err, stack) => Scaffold(
+        appBar: AppBar(),
+        body: Center(child: Text('학생 정보를 찾을 수 없습니다: $err')),
+      ),
+    );
+  }
+
+  void _showDeleteDialog(BuildContext context, WidgetRef ref, String studentName) {
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('학생 삭제'),
+          content: Text('$studentName 학생을 삭제하시겠습니까?\n이 학생의 출결, 과제, 성적 기록이 모두 영구 삭제됩니다.'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('취소'),
+            ),
+            TextButton(
+              onPressed: () async {
+                Navigator.pop(context); // close dialog
+                final router = GoRouter.of(context);
+                final backup = await ref.read(studentRepositoryProvider).deleteStudentWithBackup(studentId);
+                router.go('/student'); // Go back to list
+
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text('$studentName 학생 정보가 삭제되었습니다.'),
+                    duration: const Duration(seconds: 5),
+                    action: SnackBarAction(
+                      label: '실행 취소',
+                      onPressed: () async {
+                        await ref.read(studentRepositoryProvider).restoreStudentBackup(backup);
+                        ref.invalidate(studentsStreamProvider);
+                      },
+                    ),
+                  ),
+                );
+              },
+              style: TextButton.styleFrom(foregroundColor: const Color(0xFFF44336)),
+              child: const Text('삭제'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _buildProfileHeader(BuildContext context, WidgetRef ref, stats) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+
+    return Container(
+      padding: const EdgeInsets.all(16.0),
+      color: isDark ? theme.colorScheme.surface : const Color(0xFFF8FAFC),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              CircleAvatar(
+                radius: 36,
+                backgroundColor: theme.colorScheme.primary.withOpacity(0.1),
+                child: Text(
+                  stats.name.substring(0, 1),
+                  style: theme.textTheme.headlineMedium?.copyWith(
+                    color: theme.colorScheme.primary,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Text(
+                          stats.name,
+                          style: theme.textTheme.headlineMedium?.copyWith(
+                            fontSize: 22,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: theme.colorScheme.primary.withOpacity(0.1),
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: Text(
+                            _formatGrade(stats.grade),
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: theme.colorScheme.primary,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      '학교: ${stats.school}',
+                      style: theme.textTheme.bodyMedium,
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      '부모 연락처: ${stats.parentPhone}',
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: theme.colorScheme.primary,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                '등록일: ${stats.registrationDate}',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.textTheme.bodySmall?.color?.withOpacity(0.6),
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: stats.isActive 
+                      ? const Color(0xFFE8F5E9) 
+                      : const Color(0xFFFFEBEE),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Text(
+                  stats.isActive ? '재원 중' : '휴원 상태',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: stats.isActive 
+                        ? const Color(0xFF2E7D32) 
+                        : const Color(0xFFC62828),
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          _InlineTeacherMemoEditor(
+            studentId: stats.id,
+            initialMemo: stats.memo,
+            ref: ref,
+          ),
+        ],
+      ),
+    );
+  }  Widget _buildAttendanceTab(BuildContext context, WidgetRef ref, int studentId, List<StudentAttendanceLog> logs) {
+    final theme = Theme.of(context);
+    if (logs.isEmpty) {
+      return Center(child: Text('기록된 출결이 없습니다.', style: theme.textTheme.bodyMedium));
+    }
+    return ListView.builder(
+      padding: const EdgeInsets.all(16),
+      itemCount: logs.length,
+      itemBuilder: (context, index) {
+        final log = logs[index];
+        Color badgeColor;
+        String statusKr;
+
+        if (log.status == 'ATTENDANCE') {
+          badgeColor = const Color(0xFF4CAF50);
+          statusKr = '출석';
+        } else if (log.status == 'LATE') {
+          badgeColor = const Color(0xFFFF9800);
+          statusKr = '지각';
+        } else if (log.status == 'ABSENT') {
+          badgeColor = const Color(0xFFF44336);
+          statusKr = '결석';
+        } else {
+          badgeColor = const Color(0xFF9C27B0);
+          statusKr = '휴원';
+        }
+
+        return Card(
+          margin: const EdgeInsets.only(bottom: 8),
+          elevation: 0,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          child: ListTile(
+            title: Text(
+              log.date,
+              style: theme.textTheme.bodyLarge?.copyWith(fontWeight: FontWeight.bold),
+            ),
+            trailing: InkWell(
+              onTap: () async {
+                final prevStatus = log.status;
+                String nextStatus;
+                if (log.status == 'ATTENDANCE') {
+                  nextStatus = 'LATE';
+                } else if (log.status == 'LATE') {
+                  nextStatus = 'ABSENT';
+                } else if (log.status == 'ABSENT') {
+                  nextStatus = 'LEAVE';
+                } else {
+                  nextStatus = 'ATTENDANCE';
+                }
+                await ref.read(attendanceRepositoryProvider).updateAttendanceStatus(
+                  studentId: studentId,
+                  date: log.date,
+                  status: nextStatus,
+                );
+                ref.invalidate(studentDetailStreamProvider(studentId));
+                ref.invalidate(attendanceStreamProvider);
+
+                ScaffoldMessenger.of(context).clearSnackBars();
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: const Text('출결 상태가 변경되었습니다.'),
+                    duration: const Duration(seconds: 5),
+                    action: SnackBarAction(
+                      label: '실행 취소',
+                      onPressed: () async {
+                        await ref.read(attendanceRepositoryProvider).updateAttendanceStatus(
+                          studentId: studentId,
+                          date: log.date,
+                          status: prevStatus,
+                        );
+                        ref.invalidate(studentDetailStreamProvider(studentId));
+                        ref.invalidate(attendanceStreamProvider);
+                      },
+                    ),
+                  ),
+                );
+              },
+              borderRadius: BorderRadius.circular(6),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10), // Larger tap target
+                decoration: BoxDecoration(
+                  color: badgeColor.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(6),
+                  border: Border.all(color: badgeColor.withOpacity(0.3)),
+                ),
+                child: Text(
+                  statusKr,
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: badgeColor,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+  Widget _buildHomeworkTab(BuildContext context, WidgetRef ref, int studentId, List<StudentHomeworkLog> logs) {
+    final theme = Theme.of(context);
+    if (logs.isEmpty) {
+      return Center(child: Text('기록된 과제가 없습니다.', style: theme.textTheme.bodyMedium));
+    }
+    return ListView.builder(
+      padding: const EdgeInsets.all(16),
+      itemCount: logs.length,
+      itemBuilder: (context, index) {
+        final log = logs[index];
+        Color statusColor;
+        String statusText;
+
+        if (log.status == 'COMPLETED') {
+          statusColor = const Color(0xFF4CAF50);
+          statusText = '○ 완료';
+        } else if (log.status == 'PARTIAL') {
+          statusColor = const Color(0xFFFF9800);
+          statusText = '△ 일부 완료';
+        } else {
+          statusColor = const Color(0xFFF44336);
+          statusText = '× 미완료';
+        }
+
+        return Card(
+          margin: const EdgeInsets.only(bottom: 8),
+          child: Padding(
+            padding: const EdgeInsets.all(16.0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Expanded(
+                      child: Text(
+                        log.title,
+                        style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                    InkWell(
+                      onTap: () async {
+                        final prevStatus = log.status;
+                        String nextStatus;
+                        if (log.status == 'COMPLETED') {
+                          nextStatus = 'PARTIAL';
+                        } else if (log.status == 'PARTIAL') {
+                          nextStatus = 'INCOMPLETE';
+                        } else {
+                          nextStatus = 'COMPLETED';
+                        }
+                        await ref.read(homeworkRepositoryProvider).updateHomeworkStatus(
+                          studentId: studentId,
+                          date: log.date,
+                          status: nextStatus,
+                          title: log.title,
+                          memo: log.memo,
+                        );
+                        ref.invalidate(studentDetailStreamProvider(studentId));
+                        ref.invalidate(homeworkStreamProvider);
+
+                        ScaffoldMessenger.of(context).clearSnackBars();
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: const Text('과제 상태가 변경되었습니다.'),
+                            duration: const Duration(seconds: 5),
+                            action: SnackBarAction(
+                              label: '실행 취소',
+                              onPressed: () async {
+                                await ref.read(homeworkRepositoryProvider).updateHomeworkStatus(
+                                  studentId: studentId,
+                                  date: log.date,
+                                  status: prevStatus,
+                                  title: log.title,
+                                  memo: log.memo,
+                                );
+                                ref.invalidate(studentDetailStreamProvider(studentId));
+                                ref.invalidate(homeworkStreamProvider);
+                              },
+                            ),
+                          ),
+                        );
+                      },
+                      borderRadius: BorderRadius.circular(4),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8), // Larger touch target
+                        child: Text(
+                          statusText,
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            color: statusColor,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  '날짜: ${log.date}',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.textTheme.bodySmall?.color?.withOpacity(0.6),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                _InlineHomeworkMemoEditor(
+                  studentId: studentId,
+                  log: log,
+                  ref: ref,
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildExamsTab(BuildContext context, List<StudentExamLog> logs) {
+    final theme = Theme.of(context);
+    if (logs.isEmpty) {
+      return Center(child: Text('기록된 시험 점수가 없습니다.', style: theme.textTheme.bodyMedium));
+    }
+    return ListView.builder(
+      padding: const EdgeInsets.all(16),
+      itemCount: logs.length,
+      itemBuilder: (context, index) {
+        final log = logs[index];
+        return Card(
+          margin: const EdgeInsets.only(bottom: 8),
+          child: ListTile(
+            title: Text(
+              log.title,
+              style: theme.textTheme.bodyLarge?.copyWith(fontWeight: FontWeight.bold),
+            ),
+            subtitle: Text('날짜: ${log.date}'),
+            trailing: Text(
+              '${log.score}점',
+              style: theme.textTheme.titleLarge?.copyWith(
+                color: theme.colorScheme.primary,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildAITab(BuildContext context, StudentDetailData detail) {
+    final ai = detail.aiEvaluation;
+    final theme = Theme.of(context);
+
+    // Check if the overall data is sufficient. If not, show fallback warning.
+    if (!ai.isSufficient) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24.0),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(Icons.analytics_outlined, size: 48, color: Colors.grey.shade400),
+              const SizedBox(height: 12),
+              Text(
+                '분석할 데이터가 충분하지 않습니다.',
+                style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                '정확한 분석을 위해 시험 성적, 과제 완료 여부, 출결 기록을 먼저 입력해주세요.',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: Colors.grey),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Subtitle
+          Padding(
+            padding: const EdgeInsets.only(left: 4.0, bottom: 12.0),
+            child: Text(
+              '데이터 기반 맞춤 학습 분석 보고서',
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: theme.colorScheme.primary,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
+
+          _buildLearningCard(
+            context,
+            title: '시험',
+            content: ai.examText,
+            icon: Icons.assessment_outlined,
+            color: theme.colorScheme.primary,
+          ),
+          const SizedBox(height: 12),
+          _buildLearningCard(
+            context,
+            title: '과제',
+            content: ai.homeworkText,
+            icon: Icons.assignment_outlined,
+            color: const Color(0xFFFF9800),
+          ),
+          const SizedBox(height: 12),
+          _buildLearningCard(
+            context,
+            title: '출결',
+            content: ai.attendanceText,
+            icon: Icons.calendar_today_outlined,
+            color: const Color(0xFF4CAF50),
+          ),
+          const SizedBox(height: 12),
+          _buildLearningCard(
+            context,
+            title: '성장률',
+            content: ai.growthText,
+            icon: Icons.trending_up_outlined,
+            color: const Color(0xFF9C27B0),
+          ),
+          const SizedBox(height: 12),
+          _buildLearningCard(
+            context,
+            title: '주의사항',
+            content: ai.warningText,
+            icon: Icons.warning_amber_rounded,
+            color: const Color(0xFFEF5350),
+          ),
+          const SizedBox(height: 12),
+          _buildLearningCard(
+            context,
+            title: '추천',
+            content: ai.recommendationText,
+            icon: Icons.lightbulb_outline,
+            color: const Color(0xFF2E7D32),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildLearningCard(
+    BuildContext context, {
+    required String title,
+    required String content,
+    required IconData icon,
+    required Color color,
+  }) {
+    final theme = Theme.of(context);
+
+    return MathCard(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: color.withOpacity(0.1),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(icon, color: color, size: 20),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    fontWeight: FontWeight.bold,
+                    color: color,
+                    letterSpacing: 0.5,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  content,
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 15,
+                    height: 1.4,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildConsultingTab(BuildContext context, WidgetRef ref, int studentId, List<StudentConsultingLog> logs) {
+    final theme = Theme.of(context);
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.all(16.0),
+          child: ElevatedButton.icon(
+            onPressed: () => _showAddConsultingDialog(context, ref, studentId),
+            icon: const Icon(Icons.add),
+            label: const Text('상담 일지 추가'),
+            style: ElevatedButton.styleFrom(
+              minimumSize: const Size(double.infinity, 48), // Large touch target
+            ),
+          ),
+        ),
+        Expanded(
+          child: logs.isEmpty
+              ? Center(child: Text('등록된 상담 일지가 없습니다.', style: theme.textTheme.bodyMedium))
+              : ListView.builder(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  itemCount: logs.length,
+                  itemBuilder: (context, index) {
+                    final log = logs[index];
+                    return Card(
+                      margin: const EdgeInsets.only(bottom: 12),
+                      child: Padding(
+                        padding: const EdgeInsets.all(16.0),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Expanded(
+                                  child: Text(
+                                    log.title,
+                                    style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+                                  ),
+                                ),
+                                Text(
+                                  log.date,
+                                  style: theme.textTheme.bodySmall?.copyWith(
+                                    color: theme.textTheme.bodySmall?.color?.withOpacity(0.5),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            if (log.memo != null && log.memo!.trim().isNotEmpty) ...[
+                              const Padding(
+                                padding: EdgeInsets.symmetric(vertical: 8.0),
+                                child: Divider(height: 1),
+                              ),
+                              Text(
+                                log.memo!,
+                                style: theme.textTheme.bodyMedium?.copyWith(height: 1.5),
+                              ),
+                            ],
+                            if (log.id != null) ...[
+                              const Divider(height: 8),
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.end,
+                                children: [
+                                  TextButton.icon(
+                                    onPressed: () => _showEditConsultingDialog(context, ref, studentId, log),
+                                    icon: const Icon(Icons.edit_outlined, size: 16),
+                                    label: const Text('수정'),
+                                    style: TextButton.styleFrom(minimumSize: const Size(60, 40)),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  TextButton.icon(
+                                    onPressed: () async {
+                                      await ref.read(settingsRepositoryProvider).deleteSchedule(log.id!);
+                                      ref.invalidate(studentDetailStreamProvider(studentId));
+                                      ref.invalidate(allSchedulesStreamProvider);
+                                    },
+                                    icon: const Icon(Icons.delete_outline, size: 16, color: Color(0xFFEF5350)),
+                                    label: const Text('삭제', style: TextStyle(color: Color(0xFFEF5350))),
+                                    style: TextButton.styleFrom(minimumSize: const Size(60, 40)),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ],
+                        ),
+                      ),
+                    );
+                  },
+                ),
+        ),
+      ],
+    );
+  }
+
+  void _showAddConsultingDialog(BuildContext context, WidgetRef ref, int studentId) {
+    final titleController = TextEditingController(text: '개별 상담');
+    final memoController = TextEditingController();
+    final dateController = TextEditingController(text: DateFormat('yyyy-MM-dd').format(DateTime.now()));
+
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('상담 일지 추가'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: titleController,
+                  decoration: const InputDecoration(labelText: '상담 제목 *'),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: dateController,
+                  decoration: const InputDecoration(labelText: '날짜 (YYYY-MM-DD) *'),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: memoController,
+                  maxLines: 4,
+                  decoration: const InputDecoration(labelText: '상담 내용 (메모)'),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('취소'),
+            ),
+            TextButton(
+              onPressed: () async {
+                final title = titleController.text.trim();
+                final date = dateController.text.trim();
+                final memo = memoController.text.trim();
+                if (title.isEmpty || date.isEmpty) return;
+
+                final navigator = Navigator.of(context);
+                await ref.read(settingsRepositoryProvider).addSchedule(
+                  title: title,
+                  date: date,
+                  type: 'CONSULT',
+                  memo: memo.isEmpty ? null : memo,
+                  studentId: studentId,
+                );
+
+                ref.invalidate(studentDetailStreamProvider(studentId));
+                ref.invalidate(allSchedulesStreamProvider);
+                navigator.pop();
+              },
+              child: const Text('저장'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  void _showEditConsultingDialog(BuildContext context, WidgetRef ref, int studentId, StudentConsultingLog log) {
+    final titleController = TextEditingController(text: log.title);
+    final memoController = TextEditingController(text: log.memo ?? '');
+    final dateController = TextEditingController(text: log.date);
+
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('상담 일지 수정'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: titleController,
+                  decoration: const InputDecoration(labelText: '상담 제목 *'),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: dateController,
+                  decoration: const InputDecoration(labelText: '날짜 (YYYY-MM-DD) *'),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: memoController,
+                  maxLines: 4,
+                  decoration: const InputDecoration(labelText: '상담 내용 (메모)'),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('취소'),
+            ),
+            TextButton(
+              onPressed: () async {
+                final title = titleController.text.trim();
+                final date = dateController.text.trim();
+                final memo = memoController.text.trim();
+                if (title.isEmpty || date.isEmpty) return;
+
+                final navigator = Navigator.of(context);
+                await ref.read(settingsRepositoryProvider).updateSchedule(
+                  id: log.id!,
+                  title: title,
+                  date: date,
+                  memo: memo.isEmpty ? null : memo,
+                );
+
+                ref.invalidate(studentDetailStreamProvider(studentId));
+                ref.invalidate(allSchedulesStreamProvider);
+                navigator.pop();
+              },
+              child: const Text('저장'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  String _formatGrade(int grade) {
+    if (grade >= 1 && grade <= 6) {
+      return '초$grade';
+    } else if (grade >= 7 && grade <= 9) {
+      return '중${grade - 6}';
+    }
+    return '$grade학년';
+  }
+
+  Widget _buildQuickNavigationRow(BuildContext context, WidgetRef ref, List<int> ids) {
+    final idx = ids.indexOf(studentId);
+    if (idx == -1) return const SizedBox.shrink();
+
+    final prevId = idx > 0 ? ids[idx - 1] : null;
+    final nextId = idx < ids.length - 1 ? ids[idx + 1] : null;
+
+    final theme = Theme.of(context);
+
+    return Container(
+      color: theme.brightness == Brightness.dark ? Colors.black26 : Colors.grey.shade100,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          // Previous student
+          TextButton.icon(
+            onPressed: prevId != null
+                ? () => GoRouter.of(context).replace('/student/$prevId')
+                : null,
+            icon: const Icon(Icons.arrow_back_ios, size: 14),
+            label: const Text('이전 학생', style: TextStyle(fontWeight: FontWeight.bold)),
+            style: TextButton.styleFrom(
+              foregroundColor: theme.colorScheme.primary,
+              minimumSize: const Size(100, 40),
+            ),
+          ),
+          Text(
+            '${idx + 1} / ${ids.length}',
+            style: theme.textTheme.bodyMedium?.copyWith(
+              fontWeight: FontWeight.bold,
+              color: theme.textTheme.bodyMedium?.color?.withOpacity(0.6),
+            ),
+          ),
+          // Next student
+          TextButton.icon(
+            onPressed: nextId != null
+                ? () => GoRouter.of(context).replace('/student/$nextId')
+                : null,
+            icon: const Icon(Icons.arrow_forward_ios, size: 14),
+            label: const Text('다음 학생', style: TextStyle(fontWeight: FontWeight.bold)),
+            style: TextButton.styleFrom(
+              foregroundColor: theme.colorScheme.primary,
+              minimumSize: const Size(100, 40),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _InlineTeacherMemoEditor extends StatefulWidget {
+  final int studentId;
+  final String? initialMemo;
+  final WidgetRef ref;
+
+  const _InlineTeacherMemoEditor({
+    required this.studentId,
+    required this.initialMemo,
+    required this.ref,
+  });
+
+  @override
+  State<_InlineTeacherMemoEditor> createState() => _InlineTeacherMemoEditorState();
+}
+
+class _InlineTeacherMemoEditorState extends State<_InlineTeacherMemoEditor> {
+  late TextEditingController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController(text: widget.initialMemo ?? '');
+  }
+
+  @override
+  void didUpdateWidget(covariant _InlineTeacherMemoEditor oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.initialMemo != widget.initialMemo) {
+      _controller.text = widget.initialMemo ?? '';
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: isDark ? Colors.white.withOpacity(0.03) : Colors.white,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(
+          color: isDark ? const Color(0xFF2E3135) : Colors.grey.shade200,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            '선생님 메모 (수정 시 자동 저장)',
+            style: theme.textTheme.bodySmall?.copyWith(
+              fontWeight: FontWeight.bold,
+              color: theme.colorScheme.primary,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Focus(
+            onFocusChange: (hasFocus) async {
+              if (!hasFocus) {
+                final text = _controller.text.trim();
+                if (text != (widget.initialMemo ?? '')) {
+                  await widget.ref.read(studentRepositoryProvider).updateStudentMemo(widget.studentId, text);
+                  widget.ref.invalidate(studentDetailStreamProvider(widget.studentId));
+                  widget.ref.invalidate(studentsStreamProvider);
+                }
+              }
+            },
+            child: TextField(
+              controller: _controller,
+              maxLines: null,
+              style: theme.textTheme.bodyMedium,
+              decoration: const InputDecoration(
+                hintText: '특이사항이나 상담 메모를 여기에 기록하세요...',
+                hintStyle: TextStyle(fontSize: 13, color: Colors.grey),
+                border: InputBorder.none,
+                focusedBorder: InputBorder.none,
+                enabledBorder: InputBorder.none,
+                contentPadding: EdgeInsets.zero,
+              ),
+              onSubmitted: (val) async {
+                final text = val.trim();
+                if (text != (widget.initialMemo ?? '')) {
+                  await widget.ref.read(studentRepositoryProvider).updateStudentMemo(widget.studentId, text);
+                  widget.ref.invalidate(studentDetailStreamProvider(widget.studentId));
+                  widget.ref.invalidate(studentsStreamProvider);
+                }
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _InlineHomeworkMemoEditor extends StatefulWidget {
+  final int studentId;
+  final StudentHomeworkLog log;
+  final WidgetRef ref;
+
+  const _InlineHomeworkMemoEditor({
+    required this.studentId,
+    required this.log,
+    required this.ref,
+  });
+
+  @override
+  State<_InlineHomeworkMemoEditor> createState() => _InlineHomeworkMemoEditorState();
+}
+
+class _InlineHomeworkMemoEditorState extends State<_InlineHomeworkMemoEditor> {
+  late TextEditingController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController(text: widget.log.memo ?? '');
+  }
+
+  @override
+  void didUpdateWidget(covariant _InlineHomeworkMemoEditor oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.log.memo != widget.log.memo) {
+      _controller.text = widget.log.memo ?? '';
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Row(
+      children: [
+        const Text('메모: ', style: TextStyle(fontSize: 13, color: Colors.grey)),
+        Expanded(
+          child: Focus(
+            onFocusChange: (hasFocus) async {
+              if (!hasFocus) {
+                final text = _controller.text.trim();
+                if (text != (widget.log.memo ?? '')) {
+                  await widget.ref.read(homeworkRepositoryProvider).updateHomeworkStatus(
+                    studentId: widget.studentId,
+                    date: widget.log.date,
+                    status: widget.log.status,
+                    title: widget.log.title,
+                    memo: text.isEmpty ? null : text,
+                  );
+                  widget.ref.invalidate(studentDetailStreamProvider(widget.studentId));
+                }
+              }
+            },
+            child: TextField(
+              controller: _controller,
+              style: theme.textTheme.bodyMedium?.copyWith(fontSize: 13),
+              decoration: const InputDecoration(
+                hintText: '메모 입력 (자동 저장)',
+                hintStyle: TextStyle(fontSize: 12, color: Colors.grey),
+                isDense: true,
+                contentPadding: EdgeInsets.symmetric(vertical: 4),
+                border: InputBorder.none,
+                focusedBorder: InputBorder.none,
+                enabledBorder: InputBorder.none,
+              ),
+              onSubmitted: (val) async {
+                final text = val.trim();
+                if (text != (widget.log.memo ?? '')) {
+                  await widget.ref.read(homeworkRepositoryProvider).updateHomeworkStatus(
+                    studentId: widget.studentId,
+                    date: widget.log.date,
+                    status: widget.log.status,
+                    title: widget.log.title,
+                    memo: text.isEmpty ? null : text,
+                  );
+                  widget.ref.invalidate(studentDetailStreamProvider(widget.studentId));
+                }
+              },
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
