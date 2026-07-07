@@ -1,7 +1,7 @@
 import 'database.dart';
 
 Future<void> seedDatabase(AppDatabase db) async {
-  if (db.studentsBox.isNotEmpty) {
+  if (db.settingsBox.get('database_seeded', defaultValue: false) == true) {
     return; // Already seeded
   }
 
@@ -190,4 +190,6 @@ Future<void> seedDatabase(AppDatabase db) async {
   for (final s in schedules) {
     await db.schedulesBox.put(s['id'], s);
   }
+
+  await db.settingsBox.put('database_seeded', true);
 }

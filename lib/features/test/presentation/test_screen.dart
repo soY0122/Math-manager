@@ -458,20 +458,28 @@ class TestScreen extends ConsumerWidget {
             ),
             TextButton(
               onPressed: () async {
+                final messenger = ScaffoldMessenger.of(context);
                 Navigator.pop(context);
                 final backup = await ref.read(examRepositoryProvider).deleteExamWithBackup(exam.id);
                 ref.invalidate(examsListStreamProvider);
 
-                ScaffoldMessenger.of(context).clearSnackBars();
-                ScaffoldMessenger.of(context).showSnackBar(
+                messenger.clearSnackBars();
+                messenger.showSnackBar(
                   SnackBar(
                     content: Text('"${exam.title}" 시험이 삭제되었습니다.'),
-                    duration: const Duration(seconds: 5),
+                    duration: const Duration(seconds: 3),
                     action: SnackBarAction(
                       label: '실행 취소',
                       onPressed: () async {
-                        await ref.read(examRepositoryProvider).restoreExamBackup(backup);
-                        ref.invalidate(examsListStreamProvider);
+                        try {
+                          messenger.hideCurrentSnackBar();
+                          await ref.read(examRepositoryProvider).restoreExamBackup(backup);
+                          ref.invalidate(examsListStreamProvider);
+                        } catch (e) {
+                          messenger.showSnackBar(
+                            const SnackBar(content: Text('실행취소 중 오류가 발생했습니다.')),
+                          );
+                        }
                       },
                     ),
                   ),

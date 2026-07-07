@@ -20,6 +20,9 @@ final routerProvider = Provider<GoRouter>((ref) {
   return GoRouter(
     initialLocation: '/home',
     navigatorKey: rootNavigatorKey,
+    observers: [
+      ClearSnackBarsNavigatorObserver(),
+    ],
     routes: [
       GoRoute(
         path: '/homework',
@@ -109,3 +112,36 @@ final routerProvider = Provider<GoRouter>((ref) {
     ],
   );
 });
+
+class ClearSnackBarsNavigatorObserver extends NavigatorObserver {
+  @override
+  void didPush(Route<dynamic> route, Route<dynamic>? previousRoute) {
+    super.didPush(route, previousRoute);
+    _clearSnackBars();
+  }
+
+  @override
+  void didPop(Route<dynamic> route, Route<dynamic>? previousRoute) {
+    super.didPop(route, previousRoute);
+    _clearSnackBars();
+  }
+
+  @override
+  void didRemove(Route<dynamic> route, Route<dynamic>? previousRoute) {
+    super.didRemove(route, previousRoute);
+    _clearSnackBars();
+  }
+
+  @override
+  void didReplace({Route<dynamic>? newRoute, Route<dynamic>? oldRoute}) {
+    super.didReplace(newRoute: newRoute, oldRoute: oldRoute);
+    _clearSnackBars();
+  }
+
+  void _clearSnackBars() {
+    final context = rootNavigatorKey.currentContext;
+    if (context != null) {
+      ScaffoldMessenger.of(context).clearSnackBars();
+    }
+  }
+}

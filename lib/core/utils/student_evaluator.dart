@@ -136,7 +136,10 @@ class StudentEvaluator {
     }
 
     // 6. Recommendation Section
-    String recommendationText = '현재 수준의 성실도 유지 및 심화 오답 클리닉 참가 권장';
+    String recommendationText = '현재 수준의 성실도를 유지하며 학원 학습 일정을 충실히 따르기를 권장합니다.';
+    if (scores.isNotEmpty) {
+      recommendationText = '현재 수준의 성실도 유지 및 심화 오답 클리닉 참가 권장';
+    }
     if (warningText.contains('숙제 미완료')) {
       recommendationText = '과제 미완료 누적 해소를 위해 보강 클리닉 필수 참석 및 학습 일지 작성 권장';
     } else if (warningText.contains('결석')) {

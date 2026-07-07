@@ -110,20 +110,29 @@ class StudentDetailScreen extends ConsumerWidget {
             ),
             TextButton(
               onPressed: () async {
+                final messenger = ScaffoldMessenger.of(context);
                 Navigator.pop(context); // close dialog
                 final router = GoRouter.of(context);
                 final backup = await ref.read(studentRepositoryProvider).deleteStudentWithBackup(studentId);
                 router.go('/student'); // Go back to list
 
-                ScaffoldMessenger.of(context).showSnackBar(
+                messenger.clearSnackBars();
+                messenger.showSnackBar(
                   SnackBar(
                     content: Text('$studentName 학생 정보가 삭제되었습니다.'),
-                    duration: const Duration(seconds: 5),
+                    duration: const Duration(seconds: 3),
                     action: SnackBarAction(
                       label: '실행 취소',
                       onPressed: () async {
-                        await ref.read(studentRepositoryProvider).restoreStudentBackup(backup);
-                        ref.invalidate(studentsStreamProvider);
+                        try {
+                          messenger.hideCurrentSnackBar();
+                          await ref.read(studentRepositoryProvider).restoreStudentBackup(backup);
+                          ref.invalidate(studentsStreamProvider);
+                        } catch (e) {
+                          messenger.showSnackBar(
+                            const SnackBar(content: Text('실행취소 중 오류가 발생했습니다.')),
+                          );
+                        }
                       },
                     ),
                   ),
@@ -287,6 +296,7 @@ class StudentDetailScreen extends ConsumerWidget {
             ),
             trailing: InkWell(
               onTap: () async {
+                final messenger = ScaffoldMessenger.of(context);
                 final prevStatus = log.status;
                 String nextStatus;
                 if (log.status == 'ATTENDANCE') {
@@ -306,21 +316,28 @@ class StudentDetailScreen extends ConsumerWidget {
                 ref.invalidate(studentDetailStreamProvider(studentId));
                 ref.invalidate(attendanceStreamProvider);
 
-                ScaffoldMessenger.of(context).clearSnackBars();
-                ScaffoldMessenger.of(context).showSnackBar(
+                messenger.clearSnackBars();
+                messenger.showSnackBar(
                   SnackBar(
                     content: const Text('출결 상태가 변경되었습니다.'),
-                    duration: const Duration(seconds: 5),
+                    duration: const Duration(seconds: 3),
                     action: SnackBarAction(
                       label: '실행 취소',
                       onPressed: () async {
-                        await ref.read(attendanceRepositoryProvider).updateAttendanceStatus(
-                          studentId: studentId,
-                          date: log.date,
-                          status: prevStatus,
-                        );
-                        ref.invalidate(studentDetailStreamProvider(studentId));
-                        ref.invalidate(attendanceStreamProvider);
+                        try {
+                          messenger.hideCurrentSnackBar();
+                          await ref.read(attendanceRepositoryProvider).updateAttendanceStatus(
+                            studentId: studentId,
+                            date: log.date,
+                            status: prevStatus,
+                          );
+                          ref.invalidate(studentDetailStreamProvider(studentId));
+                          ref.invalidate(attendanceStreamProvider);
+                        } catch (e) {
+                          messenger.showSnackBar(
+                            const SnackBar(content: Text('실행취소 중 오류가 발생했습니다.')),
+                          );
+                        }
                       },
                     ),
                   ),
@@ -390,6 +407,7 @@ class StudentDetailScreen extends ConsumerWidget {
                     ),
                     InkWell(
                       onTap: () async {
+                        final messenger = ScaffoldMessenger.of(context);
                         final prevStatus = log.status;
                         String nextStatus;
                         if (log.status == 'COMPLETED') {
@@ -409,23 +427,30 @@ class StudentDetailScreen extends ConsumerWidget {
                         ref.invalidate(studentDetailStreamProvider(studentId));
                         ref.invalidate(homeworkStreamProvider);
 
-                        ScaffoldMessenger.of(context).clearSnackBars();
-                        ScaffoldMessenger.of(context).showSnackBar(
+                        messenger.clearSnackBars();
+                        messenger.showSnackBar(
                           SnackBar(
                             content: const Text('과제 상태가 변경되었습니다.'),
-                            duration: const Duration(seconds: 5),
+                            duration: const Duration(seconds: 3),
                             action: SnackBarAction(
                               label: '실행 취소',
                               onPressed: () async {
-                                await ref.read(homeworkRepositoryProvider).updateHomeworkStatus(
-                                  studentId: studentId,
-                                  date: log.date,
-                                  status: prevStatus,
-                                  title: log.title,
-                                  memo: log.memo,
-                                );
-                                ref.invalidate(studentDetailStreamProvider(studentId));
-                                ref.invalidate(homeworkStreamProvider);
+                                try {
+                                  messenger.hideCurrentSnackBar();
+                                  await ref.read(homeworkRepositoryProvider).updateHomeworkStatus(
+                                    studentId: studentId,
+                                    date: log.date,
+                                    status: prevStatus,
+                                    title: log.title,
+                                    memo: log.memo,
+                                  );
+                                  ref.invalidate(studentDetailStreamProvider(studentId));
+                                  ref.invalidate(homeworkStreamProvider);
+                                } catch (e) {
+                                  messenger.showSnackBar(
+                                    const SnackBar(content: Text('실행취소 중 오류가 발생했습니다.')),
+                                  );
+                                }
                               },
                             ),
                           ),
