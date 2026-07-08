@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../student/presentation/providers/student_list_provider.dart';
+import '../../student/domain/models/student_stats.dart';
 import '../../../core/widgets/math_card.dart';
 import '../../../core/widgets/math_loader.dart';
 

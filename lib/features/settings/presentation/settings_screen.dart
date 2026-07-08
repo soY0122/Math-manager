@@ -270,9 +270,13 @@ class _ScheduleCalendarTabState extends ConsumerState<_ScheduleCalendarTab> {
       ),
     );
   }
-
   void _deleteSchedule(String id) async {
-     void _showAddScheduleDialog(BuildContext context, String defaultDate) {
+    await ref.read(settingsRepositoryProvider).deleteSchedule(id);
+    ref.invalidate(dateSchedulesStreamProvider);
+    ref.invalidate(allSchedulesStreamProvider);
+  }
+
+  void _showAddScheduleDialog(BuildContext context, String defaultDate) {
     final titleController = TextEditingController();
     final memoController = TextEditingController();
     String selectedType = 'CONSULT'; // Default
