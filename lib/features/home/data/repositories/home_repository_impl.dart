@@ -135,23 +135,15 @@ class HomeRepositoryImpl implements HomeRepository {
           final studentScores = allRecords
               .where((r) => r['studentId'] == id)
               .toList();
-          studentScores.sort((a, b) => (a['examId'] as String? ?? '').compareTo(b['examId'] as String? ?? ''));
-          final scoresList = studentScores.map((r) => r['score'] as int).toList();
 
-          double growthRate = 0.0;
-          String growthTrend = '유지';
-          if (scoresList.length >= 2) {
-            final latest = scoresList[scoresList.length - 1];
-            final previous = scoresList[scoresList.length - 2];
-            if (previous > 0) {
-              growthRate = ((latest - previous) / previous) * 100;
-            }
-            if (growthRate > 5.0) {
-              growthTrend = '상승 중';
-              risingCount++;
-            } else if (growthRate < -5.0) {
-              growthTrend = '하락 중';
-            }
+          final growthRes = StudentGrowthCalculator.calculate(
+            studentRecords: studentScores,
+            allExams: allExams,
+          );
+          final double growthRate = growthRes['rate'] as double;
+          final String growthTrend = growthRes['trend'] as String;
+          if (growthTrend == '상승 중') {
+            risingCount++;
           }
 
           leaderboard.add(GrowthLeaderboardItem(

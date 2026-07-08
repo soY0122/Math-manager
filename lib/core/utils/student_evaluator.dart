@@ -1,3 +1,5 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
+
 class AIEvaluation {
   final String examText;
   final String homeworkText;
@@ -86,9 +88,8 @@ class StudentEvaluator {
     // 4. Growth Section
     String growthText = '분석할 데이터가 충분하지 않습니다.';
     if (scores.length >= 2) {
-      final latest = scores.last;
-      final first = scores.first;
-      final growthPct = first > 0 ? (((latest - first) / first) * 100).round() : 0;
+      final growthRate = StudentGrowthCalculator.calculateFromScores(scores);
+      final growthPct = growthRate.round();
       growthText = growthPct >= 0 ? '+$growthPct%' : '$growthPct%';
     }
 
@@ -373,5 +374,95 @@ class StudentRiskCalculator {
       classification: classification,
       triggers: triggers,
     );
+  }
+}
+
+class StudentGrowthCalculator {
+  /// Calculates the growth rate from exam records of a student.
+  /// 
+  /// Receives:
+  /// - `studentRecords`: list of exam record documents for this student (each having 'examId' and 'score').
+  /// - `allExams`: list of all exam documents (each having 'docId' and 'date').
+  /// 
+  /// Returns a Map containing:
+  /// - `'rate'`: double (the calculated growth rate, or 0.0 if not enough data)
+  /// - `'trend'`: String ('상승 중', '하락 중', or '유지')
+  static Map<String, dynamic> calculate({
+    required List<Map<String, dynamic>> studentRecords,
+    required List<Map<String, dynamic>> allExams,
+  }) {
+    final List<Map<String, dynamic>> examDatesAndScores = [];
+    for (final r in studentRecords) {
+      final examId = r['examId'] as String?;
+      final score = r['score'] as int? ?? 0;
+      final examDoc = allExams.firstWhere(
+        (e) => e['docId'] == examId,
+        orElse: () => <String, dynamic>{},
+      );
+      final examDateTs = examDoc['date'] as Timestamp?;
+      if (examDateTs == null) continue;
+      examDatesAndScores.add({
+        'date': examDateTs.toDate(),
+        'score': score,
+      });
+    }
+
+    // Sort chronologically ascending (oldest to newest)
+    examDatesAndScores.sort((a, b) => (a['date'] as DateTime).compareTo(b['date'] as DateTime));
+    final scores = examDatesAndScores.map((item) => item['score'] as int).toList();
+
+    if (scores.length < 2) {
+      return {
+        'rate': 0.0,
+        'trend': '유지',
+      };
+    }
+
+    final int recent = scores.last;
+    final priorScores = scores.sublist(0, scores.length - 1);
+    if (priorScores.isEmpty) {
+      return {
+        'rate': 0.0,
+        'trend': '유지',
+      };
+    }
+
+    final double previousAverage = priorScores.reduce((a, b) => a + b) / priorScores.length;
+    if (previousAverage <= 0.0) {
+      return {
+        'rate': 0.0,
+        'trend': '유지',
+      };
+    }
+
+    final double rate = ((recent - previousAverage) / previousAverage) * 100;
+    String trend = '유지';
+    if (rate > 5.0) {
+      trend = '상승 중';
+    } else if (rate < -5.0) {
+      trend = '하락 중';
+    }
+
+    return {
+      'rate': rate,
+      'trend': trend,
+    };
+  }
+
+  /// Calculates the growth rate from a chronological list of scores directly.
+  static double calculateFromScores(List<int> chronologicalScores) {
+    if (chronologicalScores.length < 2) {
+      return 0.0;
+    }
+    final int recent = chronologicalScores.last;
+    final priorScores = chronologicalScores.sublist(0, chronologicalScores.length - 1);
+    if (priorScores.isEmpty) {
+      return 0.0;
+    }
+    final double previousAverage = priorScores.reduce((a, b) => a + b) / priorScores.length;
+    if (previousAverage <= 0.0) {
+      return 0.0;
+    }
+    return ((recent - previousAverage) / previousAverage) * 100;
   }
 }

@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 import 'package:rxdart/rxdart.dart';
 import '../../domain/models/settings_models.dart';
 import '../../domain/repositories/settings_repository.dart';
+import '../../../../core/utils/student_evaluator.dart';
 
 class SettingsRepositoryImpl implements SettingsRepository {
   SettingsRepositoryImpl();
@@ -98,8 +99,10 @@ class SettingsRepositoryImpl implements SettingsRepository {
     final examRecordsStream = FirebaseFirestore.instance.collection('exam_records').snapshots();
     final attendancesStream = FirebaseFirestore.instance.collection('attendances').snapshots();
     final homeworksStream = FirebaseFirestore.instance.collection('homeworks').snapshots();
+    final examsStream = FirebaseFirestore.instance.collection('exams').snapshots();
 
-    return Rx.combineLatest4<
+    return Rx.combineLatest5<
+        QuerySnapshot<Map<String, dynamic>>,
         QuerySnapshot<Map<String, dynamic>>,
         QuerySnapshot<Map<String, dynamic>>,
         QuerySnapshot<Map<String, dynamic>>,
@@ -109,12 +112,14 @@ class SettingsRepositoryImpl implements SettingsRepository {
       examRecordsStream,
       attendancesStream,
       homeworksStream,
-      (studentsSnap, examRecordsSnap, attendancesSnap, homeworksSnap) {
+      examsStream,
+      (studentsSnap, examRecordsSnap, attendancesSnap, homeworksSnap, examsSnap) {
         final allStudentsDocs = studentsSnap.docs;
         final allStudents = allStudentsDocs.map((doc) => doc.data()..['docId'] = doc.id).toList();
         final allRecords = examRecordsSnap.docs.map((doc) => doc.data()).toList();
         final allAttendances = attendancesSnap.docs.map((doc) => doc.data()).toList();
         final allHomeworks = homeworksSnap.docs.map((doc) => doc.data()).toList();
+        final allExams = examsSnap.docs.map((doc) => doc.data()..['docId'] = doc.id).toList();
 
         final activeStudents = allStudents.where((s) => s['isActive'] == true).toList();
 
@@ -191,21 +196,17 @@ class SettingsRepositoryImpl implements SettingsRepository {
           final studentScores = allRecords
               .where((r) => r['studentId'] == studentId)
               .toList();
-          studentScores.sort((a, b) => (a['examId'] as String).compareTo(b['examId'] as String));
-          final scoresList = studentScores.map((r) => r['score'] as int).toList();
 
+          final growthRes = StudentGrowthCalculator.calculate(
+            studentRecords: studentScores,
+            allExams: allExams,
+          );
+          final double growthRate = growthRes['rate'] as double;
+
+          final scoresList = studentScores.map((r) => r['score'] as int).toList();
           final double avgScore = scoresList.isNotEmpty
               ? scoresList.reduce((a, b) => a + b) / scoresList.length
               : 0.0;
-
-          double growthRate = 0.0;
-          if (scoresList.length >= 2) {
-            final latest = scoresList[scoresList.length - 1];
-            final previous = scoresList[scoresList.length - 2];
-            if (previous > 0) {
-              growthRate = ((latest - previous) / previous) * 100;
-            }
-          }
 
           scoreRankings.add(RankingItem(
             studentId: studentId,

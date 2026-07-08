@@ -118,21 +118,16 @@ class StudentRepositoryImpl implements StudentRepository {
               : 1.0;
 
           // 4. Growth indicator
-          double growthRate = 0.0;
-          if (scoresList.length >= 2) {
-            final latest = scoresList[scoresList.length - 1];
-            final previous = scoresList[scoresList.length - 2];
-            if (previous > 0) {
-              growthRate = ((latest - previous) / previous) * 100;
-            }
-          } else {
-            growthRate = (attendanceRate * 50.0 + homeworkRate * 50.0);
-          }
-
+          final growthRes = StudentGrowthCalculator.calculate(
+            studentRecords: studentScores,
+            allExams: allExams,
+          );
+          final double growthRate = growthRes['rate'] as double;
+          final String trendText = growthRes['trend'] as String;
           String growthTrend = '유지';
-          if (growthRate > 5) {
+          if (trendText == '상승 중') {
             growthTrend = '▲ 상승 중';
-          } else if (growthRate < -5) {
+          } else if (trendText == '하락 중') {
             growthTrend = '▼ 하락 중';
           }
 
