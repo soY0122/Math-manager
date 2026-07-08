@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/theme/theme_provider.dart';
+import '../../auth/presentation/providers/auth_provider.dart';
 import 'providers/settings_providers.dart';
 import '../domain/models/settings_models.dart';
 import '../../../core/widgets/math_card.dart';
@@ -596,6 +597,34 @@ class _SystemSettingsTab extends ConsumerWidget {
                     leading: Icon(Icons.info_outline),
                     title: Text('앱 버전 정보'),
                     trailing: Text('v1.0.0 (Release)'),
+                  ),
+                  const Divider(height: 1),
+                  ListTile(
+                    leading: const Icon(Icons.logout, color: Colors.red),
+                    title: const Text('로그아웃', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
+                    subtitle: const Text('계정에서 로그아웃합니다.'),
+                    onTap: () async {
+                      final confirm = await showDialog<bool>(
+                        context: context,
+                        builder: (context) => AlertDialog(
+                          title: const Text('로그아웃'),
+                          content: const Text('정말로 로그아웃 하시겠습니까?'),
+                          actions: [
+                            TextButton(
+                              onPressed: () => Navigator.pop(context, false),
+                              child: const Text('취소'),
+                            ),
+                            TextButton(
+                              onPressed: () => Navigator.pop(context, true),
+                              child: const Text('로그아웃', style: TextStyle(color: Colors.red)),
+                            ),
+                          ],
+                        ),
+                      );
+                      if (confirm == true) {
+                        await ref.read(authNotifierProvider.notifier).signOut();
+                      }
+                    },
                   ),
                 ],
               ),

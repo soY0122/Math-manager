@@ -223,6 +223,7 @@ class _StudentAddEditScreenState extends ConsumerState<StudentAddEditScreen> {
       initialDate: DateTime.tryParse(_dateController.text) ?? DateTime.now(),
       firstDate: DateTime(2020),
       lastDate: DateTime(2030),
+      locale: const Locale('ko', 'KR'),
     );
     if (picked != null) {
       setState(() {

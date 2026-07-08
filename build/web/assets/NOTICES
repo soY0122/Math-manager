@@ -1789,6 +1789,9 @@ fake_async
    limitations under the License.
 --------------------------------------------------------------------------------
 cloud_firestore_web
+firebase_auth
+firebase_auth_platform_interface
+firebase_auth_web
 firebase_core
 firebase_core_platform_interface
 
@@ -2403,6 +2406,7 @@ found in the LICENSE file.
 --------------------------------------------------------------------------------
 dart_style
 glob
+http
 http_parser
 matcher
 path

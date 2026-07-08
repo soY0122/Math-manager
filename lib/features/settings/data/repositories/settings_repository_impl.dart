@@ -138,14 +138,24 @@ class SettingsRepositoryImpl implements SettingsRepository {
               ? gradeRecords.map((r) => r['score'] as int).reduce((a, b) => a + b) / gradeRecords.length
               : 0.0;
 
-          final gradeAtts = allAttendances.where((a) => gradeStudentIds.contains(a['studentId'])).toList();
+          final gradeAttsAll = allAttendances.where((a) => gradeStudentIds.contains(a['studentId'])).toList();
+          final Map<String, String> uniqueGradeAtts = {};
+          for (final a in gradeAttsAll) {
+            final stId = a['studentId'] as String;
+            final dateTs = a['date'] as Timestamp?;
+            if (dateTs == null) continue;
+            final dateStr = DateFormat('yyyy-MM-dd').format(dateTs.toDate());
+            uniqueGradeAtts['${stId}_$dateStr'] = a['status'] as String? ?? 'ATTENDANCE';
+          }
           int present = 0;
           int late = 0;
-          for (final a in gradeAtts) {
-            if (a['status'] == 'ATTENDANCE') present++;
-            if (a['status'] == 'LATE') late++;
+          int earlyLeave = 0;
+          for (final status in uniqueGradeAtts.values) {
+            if (status == 'ATTENDANCE') present++;
+            if (status == 'LATE') late++;
+            if (status == 'EARLY_LEAVE') earlyLeave++;
           }
-          final double attRate = gradeAtts.isNotEmpty ? (present + late) / gradeAtts.length : 1.0;
+          final double attRate = uniqueGradeAtts.isNotEmpty ? (present + late + earlyLeave) / uniqueGradeAtts.length : 1.0;
 
           final gradeHws = allHomeworks.where((h) => gradeStudentIds.contains(h['studentId'])).toList();
           int completed = 0;

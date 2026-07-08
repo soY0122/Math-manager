@@ -48,7 +48,9 @@ class HomeRepositoryImpl implements HomeRepository {
             .where((a) {
               final aStudentId = a['studentId'] as String? ?? '';
               final aDateTs = a['date'] as Timestamp?;
-              return aDateTs != null && aDateTs.seconds == targetTimestamp.seconds && activeStudentIds.contains(aStudentId);
+              if (aDateTs == null) return false;
+              final aDateStr = DateFormat('yyyy-MM-dd').format(aDateTs.toDate());
+              return aDateStr == todayStr && activeStudentIds.contains(aStudentId);
             })
             .toList();
 
@@ -58,7 +60,7 @@ class HomeRepositoryImpl implements HomeRepository {
 
         for (final att in todayAtts) {
           final status = att['status'] as String;
-          if (status == 'ATTENDANCE') todayPresent++;
+          if (status == 'ATTENDANCE' || status == 'EARLY_LEAVE') todayPresent++;
           if (status == 'LATE') todayLate++;
           if (status == 'ABSENT') todayAbsent++;
         }

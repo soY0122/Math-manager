@@ -80,16 +80,24 @@ class StudentRepositoryImpl implements StudentRepository {
               : 0.0;
 
           // 2. Attendance rate
-          final studentAtts = allAttendances.where((a) => a['studentId'] == id).toList();
+          final studentAttsAll = allAttendances.where((a) => a['studentId'] == id).toList();
+          final Map<String, String> uniqueAtts = {};
+          for (final a in studentAttsAll) {
+            final dateTs = a['date'] as Timestamp?;
+            if (dateTs == null) continue;
+            final dateStr = DateFormat('yyyy-MM-dd').format(dateTs.toDate());
+            uniqueAtts[dateStr] = a['status'] as String? ?? 'ATTENDANCE';
+          }
           int presentCount = 0;
           int lateCount = 0;
-          for (final att in studentAtts) {
-            final status = att['status'] as String;
+          int earlyLeaveCount = 0;
+          for (final status in uniqueAtts.values) {
             if (status == 'ATTENDANCE') presentCount++;
             if (status == 'LATE') lateCount++;
+            if (status == 'EARLY_LEAVE') earlyLeaveCount++;
           }
-          final double attendanceRate = studentAtts.isNotEmpty
-              ? (presentCount + lateCount) / studentAtts.length
+          final double attendanceRate = uniqueAtts.isNotEmpty
+              ? (presentCount + lateCount + earlyLeaveCount) / uniqueAtts.length
               : 1.0;
 
           // 3. Homework rate
@@ -157,33 +165,44 @@ class StudentRepositoryImpl implements StudentRepository {
 
   @override
   Stream<StudentDetailData> watchStudentDetail(String studentId) {
-    final studentsStream = FirebaseFirestore.instance.collection('students').snapshots();
-    final examRecordsStream = FirebaseFirestore.instance.collection('exam_records').snapshots();
-    final attendancesStream = FirebaseFirestore.instance.collection('attendances').snapshots();
-    final homeworksStream = FirebaseFirestore.instance.collection('homeworks').snapshots();
+    final studentStream = FirebaseFirestore.instance.collection('students').doc(studentId).snapshots();
+    final examRecordsStream = FirebaseFirestore.instance
+        .collection('exam_records')
+        .where('studentId', isEqualTo: studentId)
+        .snapshots();
+    final attendancesStream = FirebaseFirestore.instance
+        .collection('attendances')
+        .where('studentId', isEqualTo: studentId)
+        .snapshots();
+    final homeworksStream = FirebaseFirestore.instance
+        .collection('homeworks')
+        .where('studentId', isEqualTo: studentId)
+        .snapshots();
     final examsStream = FirebaseFirestore.instance.collection('exams').snapshots();
-    final schedulesStream = FirebaseFirestore.instance.collection('schedules').snapshots();
+    final schedulesStream = FirebaseFirestore.instance
+        .collection('schedules')
+        .where('type', isEqualTo: 'CONSULT')
+        .snapshots();
 
     return Rx.combineLatest6<
-        QuerySnapshot<Map<String, dynamic>>,
+        DocumentSnapshot<Map<String, dynamic>>,
         QuerySnapshot<Map<String, dynamic>>,
         QuerySnapshot<Map<String, dynamic>>,
         QuerySnapshot<Map<String, dynamic>>,
         QuerySnapshot<Map<String, dynamic>>,
         QuerySnapshot<Map<String, dynamic>>,
         StudentDetailData>(
-      studentsStream,
+      studentStream,
       examRecordsStream,
       attendancesStream,
       homeworksStream,
       examsStream,
       schedulesStream,
-      (studentsSnap, recordsSnap, attendancesSnap, homeworksSnap, examsSnap, schedulesSnap) {
-        final sDoc = studentsSnap.docs.firstWhere(
-          (doc) => doc.id == studentId,
-          orElse: () => throw Exception('Student not found: $studentId'),
-        );
-        final sVal = sDoc.data();
+      (studentSnap, recordsSnap, attendancesSnap, homeworksSnap, examsSnap, schedulesSnap) {
+        if (!studentSnap.exists) {
+          throw Exception('Student not found: $studentId');
+        }
+        final sVal = studentSnap.data()!;
 
         final name = sVal['name'] as String? ?? '';
         final photoPath = sVal['photoPath'] as String?;
@@ -202,7 +221,19 @@ class StudentRepositoryImpl implements StudentRepository {
 
         final allExams = examsSnap.docs.map((doc) => doc.data()..['docId'] = doc.id).toList();
         final allRecords = recordsSnap.docs.map((doc) => doc.data()).toList();
-        final allAttendances = attendancesSnap.docs.map((doc) => doc.data()).toList();
+        final allAttendances = attendancesSnap.docs.map((doc) {
+          final data = doc.data();
+          final sId = data['studentId'] as String?;
+          final dateTs = data['date'] as Timestamp?;
+          if (sId != null && dateTs != null) {
+            final dateStr = DateFormat('yyyy-MM-dd').format(dateTs.toDate());
+            final expectedId = '${sId}_${dateStr.replaceAll('-', '')}';
+            if (doc.id != expectedId) {
+              _migrateLegacyDoc(doc, expectedId);
+            }
+          }
+          return data;
+        }).toList();
         final allHomeworks = homeworksSnap.docs.map((doc) => doc.data()).toList();
         final allSchedules = schedulesSnap.docs.map((doc) => doc.data()..['docId'] = doc.id).toList();
 
@@ -226,13 +257,25 @@ class StudentRepositoryImpl implements StudentRepository {
 
         // 2. Fetch attendance logs
         final studentAtts = allAttendances.where((a) => a['studentId'] == studentId).toList();
-        final List<StudentAttendanceLog> attendanceLogs = studentAtts.map<StudentAttendanceLog>((a) {
+        studentAtts.sort((a, b) {
+          final aUp = a['updatedAt'] as Timestamp?;
+          final bUp = b['updatedAt'] as Timestamp?;
+          if (aUp == null && bUp == null) return 0;
+          if (aUp == null) return -1;
+          if (bUp == null) return 1;
+          return aUp.compareTo(bUp);
+        });
+        final Map<String, StudentAttendanceLog> attendanceMap = {};
+        for (final a in studentAtts) {
           final attDateTs = a['date'] as Timestamp?;
-          return StudentAttendanceLog(
-            date: attDateTs != null ? DateFormat('yyyy-MM-dd').format(attDateTs.toDate()) : '',
+          if (attDateTs == null) continue;
+          final dateStr = DateFormat('yyyy-MM-dd').format(attDateTs.toDate());
+          attendanceMap[dateStr] = StudentAttendanceLog(
+            date: dateStr,
             status: a['status'] as String? ?? 'ATTENDANCE',
           );
-        }).toList();
+        }
+        final List<StudentAttendanceLog> attendanceLogs = attendanceMap.values.toList();
         attendanceLogs.sort((a, b) => b.date.compareTo(a.date));
 
         // 3. Fetch homework logs
@@ -280,13 +323,15 @@ class StudentRepositoryImpl implements StudentRepository {
 
         int presentCount = 0;
         int lateCount = 0;
-        for (final att in studentAtts) {
-          final status = att['status'] as String;
+        int earlyLeaveCount = 0;
+        for (final log in attendanceLogs) {
+          final status = log.status;
           if (status == 'ATTENDANCE') presentCount++;
           if (status == 'LATE') lateCount++;
+          if (status == 'EARLY_LEAVE') earlyLeaveCount++;
         }
-        final double attendanceRate = studentAtts.isNotEmpty
-            ? (presentCount + lateCount) / studentAtts.length
+        final double attendanceRate = attendanceLogs.isNotEmpty
+            ? (presentCount + lateCount + earlyLeaveCount) / attendanceLogs.length
             : 1.0;
 
         int completedCount = 0;
@@ -436,5 +481,37 @@ class StudentRepositoryImpl implements StudentRepository {
       'isActive': true,
       'updatedAt': FieldValue.serverTimestamp(),
     });
+  }
+
+  void _migrateLegacyDoc(DocumentSnapshot doc, String expectedId) {
+    final docRef = FirebaseFirestore.instance.collection('attendances').doc(doc.id);
+    final newDocRef = FirebaseFirestore.instance.collection('attendances').doc(expectedId);
+    
+    FirebaseFirestore.instance.runTransaction((transaction) async {
+      final newDocSnap = await transaction.get(newDocRef);
+      final data = doc.data() as Map<String, dynamic>?;
+      if (data == null) return;
+      
+      if (!newDocSnap.exists) {
+        transaction.set(newDocRef, {
+          ...data,
+          'updatedAt': FieldValue.serverTimestamp(),
+        });
+      } else {
+        final legacyUp = data['updatedAt'] as Timestamp?;
+        final newUp = (newDocSnap.data() as Map<String, dynamic>?)?['updatedAt'] as Timestamp?;
+        bool useLegacy = true;
+        if (legacyUp != null && newUp != null) {
+          useLegacy = legacyUp.compareTo(newUp) > 0;
+        }
+        if (useLegacy) {
+          transaction.update(newDocRef, {
+            ...data,
+            'updatedAt': FieldValue.serverTimestamp(),
+          });
+        }
+      }
+      transaction.delete(docRef);
+    }).catchError((_) {});
   }
 }

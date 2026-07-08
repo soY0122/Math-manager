@@ -78,7 +78,8 @@ class StudentEvaluator {
     if (attendanceStatuses.isNotEmpty) {
       final present = attendanceStatuses.where((s) => s == 'ATTENDANCE').length;
       final late = attendanceStatuses.where((s) => s == 'LATE').length;
-      final rate = (present + late) / attendanceStatuses.length;
+      final earlyLeave = attendanceStatuses.where((s) => s == 'EARLY_LEAVE').length;
+      final rate = (present + late + earlyLeave) / attendanceStatuses.length;
       attendanceText = '출석률 ${(rate * 100).toStringAsFixed(0)}%';
     }
 

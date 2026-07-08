@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'dart:async';
+import '../../features/auth/presentation/login_screen.dart';
+import '../../features/auth/presentation/providers/auth_provider.dart';
 import '../../features/home/presentation/home_screen.dart';
 import '../../features/student/presentation/student_list_screen.dart';
 import '../../features/student/presentation/student_detail_screen.dart';
@@ -12,18 +15,54 @@ import '../../features/test/presentation/test_score_input_screen.dart';
 import '../../features/homework/presentation/homework_screen.dart';
 import '../../features/settings/presentation/settings_screen.dart';
 import '../widgets/scaffold_with_nav_bar.dart';
+import '../widgets/math_loader.dart';
 
 final rootNavigatorKey = GlobalKey<NavigatorState>();
 final shellNavigatorKey = GlobalKey<NavigatorState>();
 
 final routerProvider = Provider<GoRouter>((ref) {
+  final authState = ref.watch(authNotifierProvider);
+  final authNotifier = ref.watch(authNotifierProvider.notifier);
+
   return GoRouter(
-    initialLocation: '/home',
+    initialLocation: '/splash',
     navigatorKey: rootNavigatorKey,
+    refreshListenable: GoRouterRefreshStream(authNotifier.auth.authStateChanges()),
+    redirect: (context, state) {
+      if (authState.isLoading) {
+        return state.matchedLocation == '/splash' ? null : '/splash';
+      }
+
+      final isLoggedIn = authState.user != null;
+      final isLoggingIn = state.matchedLocation == '/login';
+      final isSplash = state.matchedLocation == '/splash';
+
+      if (!isLoggedIn) {
+        return isLoggingIn ? null : '/login';
+      }
+
+      if (isLoggingIn || isSplash) {
+        return '/home';
+      }
+
+      return null;
+    },
     observers: [
       ClearSnackBarsNavigatorObserver(),
     ],
     routes: [
+      GoRoute(
+        path: '/splash',
+        parentNavigatorKey: rootNavigatorKey,
+        builder: (context, state) => const Scaffold(
+          body: MathLoader(message: '로그인 세션을 확인하는 중...'),
+        ),
+      ),
+      GoRoute(
+        path: '/login',
+        parentNavigatorKey: rootNavigatorKey,
+        builder: (context, state) => const LoginScreen(),
+      ),
       GoRoute(
         path: '/homework',
         parentNavigatorKey: rootNavigatorKey,
@@ -145,5 +184,22 @@ class ClearSnackBarsNavigatorObserver extends NavigatorObserver {
         ScaffoldMessenger.of(context).clearSnackBars();
       } catch (_) {}
     }
+  }
+}
+
+class GoRouterRefreshStream extends ChangeNotifier {
+  late final StreamSubscription<dynamic> _subscription;
+
+  GoRouterRefreshStream(Stream<dynamic> stream) {
+    notifyListeners();
+    _subscription = stream.asBroadcastStream().listen(
+          (dynamic _) => notifyListeners(),
+        );
+  }
+
+  @override
+  void dispose() {
+    _subscription.cancel();
+    super.dispose();
   }
 }

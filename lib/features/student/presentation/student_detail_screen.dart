@@ -277,6 +277,9 @@ class StudentDetailScreen extends ConsumerWidget {
         } else if (log.status == 'LATE') {
           badgeColor = const Color(0xFFFF9800);
           statusKr = '지각';
+        } else if (log.status == 'EARLY_LEAVE') {
+          badgeColor = const Color(0xFF03A9F4);
+          statusKr = '조퇴';
         } else if (log.status == 'ABSENT') {
           badgeColor = const Color(0xFFF44336);
           statusKr = '결석';
@@ -300,11 +303,11 @@ class StudentDetailScreen extends ConsumerWidget {
                 final prevStatus = log.status;
                 String nextStatus;
                 if (log.status == 'ATTENDANCE') {
-                  nextStatus = 'LATE';
-                } else if (log.status == 'LATE') {
                   nextStatus = 'ABSENT';
                 } else if (log.status == 'ABSENT') {
-                  nextStatus = 'LEAVE';
+                  nextStatus = 'LATE';
+                } else if (log.status == 'LATE') {
+                  nextStatus = 'EARLY_LEAVE';
                 } else {
                   nextStatus = 'ATTENDANCE';
                 }

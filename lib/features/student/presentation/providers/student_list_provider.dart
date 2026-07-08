@@ -1,6 +1,5 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_core/firebase_core.dart';
 import '../../data/repositories/student_repository_impl.dart';
 import '../../domain/repositories/student_repository.dart';
 import '../../domain/models/student_stats.dart';
@@ -69,7 +68,7 @@ final studentsStreamProvider = StreamProvider<List<StudentStats>>((ref) {
 
     if (filter == 'attendance_present') {
       final presentIds = todayAttendances
-          .where((a) => a['status'] == 'ATTENDANCE')
+          .where((a) => a['status'] == 'ATTENDANCE' || a['status'] == 'EARLY_LEAVE')
           .map((a) => a['studentId'] as String)
           .toSet();
       return students.where((s) => presentIds.contains(s.id)).toList();

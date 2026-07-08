@@ -17,6 +17,7 @@ class AttendanceScreen extends ConsumerStatefulWidget {
 
 class _AttendanceScreenState extends ConsumerState<AttendanceScreen> {
   CalendarFormat _calendarFormat = CalendarFormat.week; // Week view is perfect for one-handed mobile use
+  bool _isBulkUpdating = false;
 
   @override
   Widget build(BuildContext context) {
@@ -34,18 +35,25 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> {
           TextButton.icon(
             icon: const Icon(Icons.done_all, size: 18),
             label: const Text('전체 출석'),
-            onPressed: () => _markAllAsPresent(context, dateStr),
+            onPressed: _isBulkUpdating ? null : () => _markAllAsPresent(context, dateStr),
+          ),
+          TextButton.icon(
+            icon: const Icon(Icons.event_busy, size: 18),
+            label: const Text('전체 휴원'),
+            onPressed: _isBulkUpdating ? null : () => _markAllAsLeave(context, dateStr),
           ),
           const SizedBox(width: 8),
         ],
       ),
-      body: Column(
+      body: Stack(
         children: [
-          // 1. Weekly / Monthly Calendar View
-          Container(
-            color: isDark ? theme.colorScheme.surface : const Color(0xFFF8FAFC),
-            padding: const EdgeInsets.only(bottom: 12.0),
-            child: TableCalendar(
+          Column(
+            children: [
+              // 1. Weekly / Monthly Calendar View
+              Container(
+                color: isDark ? theme.colorScheme.surface : const Color(0xFFF8FAFC),
+                padding: const EdgeInsets.only(bottom: 12.0),
+                child: TableCalendar(
               locale: 'ko_KR',
               firstDay: DateTime.utc(2020, 1, 1),
               lastDay: DateTime.utc(2030, 12, 31),
@@ -189,8 +197,17 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> {
           ),
         ],
       ),
-    );
-  }
+      if (_isBulkUpdating)
+        Container(
+          color: Colors.black.withOpacity(0.2),
+          child: const Center(
+            child: MathLoader(message: '출결 상태를 일괄 변경하는 중...'),
+          ),
+        ),
+    ],
+  ),
+);
+}
 
   Widget _buildSummaryCounter(
     BuildContext context, {
@@ -341,23 +358,102 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> {
   }
 
   Future<void> _markAllAsPresent(BuildContext context, String date) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('출석 일괄 변경'),
+        content: const Text('모든 학생을 출석으로 변경하시겠습니까?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('취소'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('확인'),
+          ),
+        ],
+      ),
+    );
+    if (confirm != true) return;
+
+    setState(() {
+      _isBulkUpdating = true;
+    });
+
     final scaffoldMessenger = ScaffoldMessenger.of(context);
     final grade = ref.read(globalGradeFilterProvider);
     try {
       await ref.read(attendanceRepositoryProvider).markAllAsPresent(date, gradeFilter: grade);
+      ref.invalidate(attendanceStreamProvider);
+
+      scaffoldMessenger.clearSnackBars();
       scaffoldMessenger.showSnackBar(
-        SnackBar(
-          content: Text(
-            grade != null 
-                ? '해당 학년의 모든 활성 학생을 출석으로 처리했습니다.' 
-                : '모든 활성 학생을 출석으로 처리했습니다.'
-          )
+        const SnackBar(
+          content: Text('모든 학생을 출석으로 변경했습니다.'),
         ),
       );
     } catch (e) {
+      scaffoldMessenger.clearSnackBars();
       scaffoldMessenger.showSnackBar(
         SnackBar(content: Text('일괄 출석 처리 실패: $e')),
       );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isBulkUpdating = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _markAllAsLeave(BuildContext context, String date) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('휴원 처리'),
+        content: const Text('오늘을 휴원일로 설정하시겠습니까?\n모든 학생의 출결이 휴원으로 변경됩니다.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('취소'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('확인'),
+          ),
+        ],
+      ),
+    );
+    if (confirm != true) return;
+
+    setState(() {
+      _isBulkUpdating = true;
+    });
+
+    final scaffoldMessenger = ScaffoldMessenger.of(context);
+    final grade = ref.read(globalGradeFilterProvider);
+    try {
+      await ref.read(attendanceRepositoryProvider).markAllAsLeave(date, gradeFilter: grade);
+      ref.invalidate(attendanceStreamProvider);
+
+      scaffoldMessenger.clearSnackBars();
+      scaffoldMessenger.showSnackBar(
+        const SnackBar(
+          content: Text('모든 학생을 휴원으로 변경했습니다.'),
+        ),
+      );
+    } catch (e) {
+      scaffoldMessenger.clearSnackBars();
+      scaffoldMessenger.showSnackBar(
+        SnackBar(content: Text('일괄 휴원 처리 실패: $e')),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isBulkUpdating = false;
+        });
+      }
     }
   }
 

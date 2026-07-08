@@ -9,4 +9,5 @@ abstract class AttendanceRepository {
     String? attendanceId,
   });
   Future<void> markAllAsPresent(String date, {int? gradeFilter});
+  Future<void> markAllAsLeave(String date, {int? gradeFilter});
 }
