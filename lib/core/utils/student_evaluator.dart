@@ -163,4 +163,215 @@ class StudentEvaluator {
       isSufficient: true,
     );
   }
+
+  static AIEvaluation evaluateWithRisk({
+    required List<int> scores,
+    required List<String> attendanceStatuses,
+    required List<String> homeworkStatuses,
+    required int riskScore,
+    required List<String> triggers,
+  }) {
+    final base = evaluate(
+      scores: scores,
+      attendanceStatuses: attendanceStatuses,
+      homeworkStatuses: homeworkStatuses,
+    );
+
+    if (!base.isSufficient) return base;
+
+    String warningText = base.warningText;
+    String recommendationText = base.recommendationText;
+
+    if (riskScore >= 4) {
+      warningText = '출결 및 학습 패턴의 상당한 변화가 감지되었습니다.\n'
+          '[위험 등급] 집중 관리 필요 학생\n'
+          '[위험 점수] $riskScore점\n\n'
+          '감지 요인:\n- ' + triggers.join('\n- ');
+      recommendationText = '최근 학습 데이터 분석에 기반하여 추가적인 개별 학습 지원이 유용할 수 있습니다.';
+    } else if (riskScore >= 2) {
+      warningText = '출결 및 과제 수행 상황에 보완이 필요한 패턴이 일부 감지되었습니다.\n'
+          '[위험 등급] 주의 필요 학생\n'
+          '[위험 점수] $riskScore점\n\n'
+          '감지 요인:\n- ' + triggers.join('\n- ');
+      recommendationText = '학습 습관 개선을 위한 과제 완료율 모니터링 및 개별 상담을 권장합니다.';
+    }
+
+    return AIEvaluation(
+      examText: base.examText,
+      homeworkText: base.homeworkText,
+      attendanceText: base.attendanceText,
+      growthText: base.growthText,
+      warningText: warningText,
+      recommendationText: recommendationText,
+      isSufficient: true,
+    );
+  }
+}
+
+class StudentRiskResult {
+  final int score;
+  final String classification;
+  final List<String> triggers;
+
+  const StudentRiskResult({
+    required this.score,
+    required this.classification,
+    required this.triggers,
+  });
+}
+
+class StudentRiskCalculator {
+  static StudentRiskResult calculate({
+    required DateTime evaluationDate,
+    required DateTime? registrationDate,
+    required List<Map<String, dynamic>> attendanceLogs,
+    required List<Map<String, dynamic>> homeworkLogs,
+    required List<Map<String, dynamic>> examLogs,
+  }) {
+    int score = 0;
+    final List<String> triggers = [];
+
+    // --- 1. Attendance Issues ---
+    final last30DaysLimit = evaluationDate.subtract(const Duration(days: 30));
+    final attsLast30 = attendanceLogs.where((a) {
+      final date = a['date'] as DateTime?;
+      return date != null && date.isAfter(last30DaysLimit);
+    }).toList();
+    
+    final absencesLast30 = attsLast30.where((a) => a['status'] == 'ABSENT').length;
+    if (absencesLast30 >= 3) {
+      score += 1;
+      triggers.add('최근 30일 이내 결석 3회 이상 ($absencesLast30회) (+1)');
+    }
+
+    final latesLast30 = attsLast30.where((a) => a['status'] == 'LATE').length;
+    if (latesLast30 >= 5) {
+      score += 1;
+      triggers.add('최근 30일 이내 지각 5회 이상 ($latesLast30회) (+1)');
+    }
+
+    // --- 2. Academic Performance Decline ---
+    final sortedExams = List<Map<String, dynamic>>.from(examLogs)
+      ..sort((a, b) {
+        final da = a['date'] as DateTime?;
+        final db = b['date'] as DateTime?;
+        if (da == null || db == null) return 0;
+        return da.compareTo(db);
+      });
+    final scores = sortedExams.map((e) => e['score'] as int).toList();
+
+    if (scores.length >= 2) {
+      final latestScore = scores.last;
+      final prevScores = scores.sublist(0, scores.length - 1);
+      final prevAvg = prevScores.reduce((a, b) => a + b) / prevScores.length;
+      if (latestScore <= prevAvg - 20) {
+        score += 1;
+        triggers.add('최근 성적이 이전 평균 대비 20점 이상 하락 (이전 평균: ${prevAvg.toStringAsFixed(1)}점, 최근: $latestScore점) (+1)');
+      }
+    }
+
+    if (scores.length >= 3) {
+      final len = scores.length;
+      if (scores[len - 1] < scores[len - 2] && scores[len - 2] < scores[len - 3]) {
+        score += 1;
+        triggers.add('최근 3회 시험 성적 연속 하락 (+1)');
+      }
+    }
+
+    // --- 3. Homework Performance Issues ---
+    final last4WeeksLimit = evaluationDate.subtract(const Duration(days: 28));
+    final hwsLast28 = homeworkLogs.where((h) {
+      final date = h['date'] as DateTime?;
+      return date != null && date.isAfter(last4WeeksLimit);
+    }).toList();
+    if (hwsLast28.isNotEmpty) {
+      final completed = hwsLast28.where((h) => h['status'] == 'COMPLETED').length;
+      final partial = hwsLast28.where((h) => h['status'] == 'PARTIAL').length;
+      final rate = (completed + (partial * 0.5)) / hwsLast28.length;
+      if (rate < 0.50) {
+        score += 1;
+        triggers.add('최근 4주 과제 완료율 50% 미만 (${(rate * 100).toStringAsFixed(0)}%) (+1)');
+      }
+    }
+
+    final sortedHws = List<Map<String, dynamic>>.from(homeworkLogs)
+      ..sort((a, b) {
+        final da = a['date'] as DateTime?;
+        final db = b['date'] as DateTime?;
+        if (da == null || db == null) return 0;
+        return da.compareTo(db);
+      });
+    if (sortedHws.length >= 3) {
+      final len = sortedHws.length;
+      if (sortedHws[len - 1]['status'] == 'INCOMPLETE' &&
+          sortedHws[len - 2]['status'] == 'INCOMPLETE' &&
+          sortedHws[len - 3]['status'] == 'INCOMPLETE') {
+        score += 1;
+        triggers.add('최근 3회 연속 과제 미제출 (+1)');
+      }
+    }
+
+    // --- 4. Learning Progress Stagnation ---
+    final last60DaysLimit = evaluationDate.subtract(const Duration(days: 60));
+    final recentExams = sortedExams.where((e) {
+      final date = e['date'] as DateTime?;
+      return date != null && date.isAfter(last60DaysLimit);
+    }).toList();
+    final olderExams = sortedExams.where((e) {
+      final date = e['date'] as DateTime?;
+      return date != null && date.isBefore(last60DaysLimit);
+    }).toList();
+    
+    bool hasStagnation = false;
+    if (recentExams.isNotEmpty && olderExams.isNotEmpty) {
+      final recentAvg = recentExams.map((e) => e['score'] as int).reduce((a, b) => a + b) / recentExams.length;
+      final olderAvg = olderExams.map((e) => e['score'] as int).reduce((a, b) => a + b) / olderExams.length;
+      if (recentAvg <= olderAvg) {
+        hasStagnation = true;
+      }
+    } else if (registrationDate != null && evaluationDate.difference(registrationDate).inDays > 60 && examLogs.isEmpty) {
+      double overallAttRate = 1.0;
+      if (attendanceLogs.isNotEmpty) {
+        final present = attendanceLogs.where((a) => a['status'] == 'ATTENDANCE').length;
+        final late = attendanceLogs.where((a) => a['status'] == 'LATE').length;
+        final earlyLeave = attendanceLogs.where((a) => a['status'] == 'EARLY_LEAVE').length;
+        overallAttRate = (present + late + earlyLeave) / attendanceLogs.length;
+      }
+      double overallHwRate = 1.0;
+      if (homeworkLogs.isNotEmpty) {
+        final completed = homeworkLogs.where((h) => h['status'] == 'COMPLETED').length;
+        final partial = homeworkLogs.where((h) => h['status'] == 'PARTIAL').length;
+        overallHwRate = (completed + (partial * 0.5)) / homeworkLogs.length;
+      }
+
+      final hasConcerns = overallAttRate < 0.90 || overallHwRate < 0.80;
+      if (hasConcerns) {
+        hasStagnation = true;
+      }
+    }
+    
+    if (hasStagnation) {
+      score += 1;
+      if (examLogs.isEmpty) {
+        triggers.add('등록 후 2달간 평가 기록이 없으며 출결 또는 과제 성실도 저조 감지 (+1)');
+      } else {
+        triggers.add('최근 2달간 학습 성취도 향상 없음 (+1)');
+      }
+    }
+
+    String classification;
+    if (score >= 4) {
+      classification = '집중 관리 필요 학생';
+    } else if (score >= 2) {
+      classification = '주의 필요 학생';
+    } else {
+      classification = '정상';
+    }
+
+    return StudentRiskResult(
+      score: score,
+      classification: classification,
+      triggers: triggers,
+    );
+  }
 }

@@ -86,7 +86,7 @@ class TodaySummary extends StatelessWidget {
             Expanded(
               child: _buildWideStatCard(
                 context,
-                title: '위험 학생군',
+                title: '집중 관리 필요 학생',
                 value: '$dangerStudentCount명',
                 icon: Icons.warning_amber_rounded,
                 iconColor: const Color(0xFFE53935),

@@ -10,6 +10,7 @@ import '../../settings/presentation/providers/settings_providers.dart';
 import '../../attendance/presentation/providers/attendance_providers.dart';
 import '../../homework/presentation/providers/homework_providers.dart';
 import 'package:intl/intl.dart';
+import 'package:fl_chart/fl_chart.dart';
 
 class StudentDetailScreen extends ConsumerWidget {
   final String studentId;
@@ -496,32 +497,310 @@ class StudentDetailScreen extends ConsumerWidget {
 
   Widget _buildExamsTab(BuildContext context, List<StudentExamLog> logs) {
     final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    
     if (logs.isEmpty) {
-      return Center(child: Text('기록된 시험 점수가 없습니다.', style: theme.textTheme.bodyMedium));
+      return Center(
+        child: Text(
+          '기록된 시험 점수가 없습니다.',
+          style: theme.textTheme.bodyMedium,
+        ),
+      );
     }
-    return ListView.builder(
-      padding: const EdgeInsets.all(16),
-      itemCount: logs.length,
-      itemBuilder: (context, index) {
-        final log = logs[index];
-        return Card(
-          margin: const EdgeInsets.only(bottom: 8),
-          child: ListTile(
-            title: Text(
-              log.title,
-              style: theme.textTheme.bodyLarge?.copyWith(fontWeight: FontWeight.bold),
-            ),
-            subtitle: Text('날짜: ${log.date}'),
-            trailing: Text(
-              '${log.score}점',
-              style: theme.textTheme.titleLarge?.copyWith(
-                color: theme.colorScheme.primary,
+
+    Widget graphWidget;
+    if (logs.length < 2) {
+      graphWidget = Padding(
+        padding: const EdgeInsets.symmetric(vertical: 24.0, horizontal: 16.0),
+        child: Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.show_chart, color: Colors.grey.shade400, size: 40),
+              const SizedBox(height: 8),
+              Text(
+                'Not enough test data to display a score trend.',
+                textAlign: TextAlign.center,
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: Colors.grey.shade600,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    } else {
+      // Calculate Stats
+      final scores = logs.map((log) => log.score).toList();
+      final highestScore = scores.reduce((a, b) => a > b ? a : b);
+      final lowestScore = scores.reduce((a, b) => a < b ? a : b);
+      final avgScore = scores.reduce((a, b) => a + b) / scores.length;
+      final latestScore = logs[0].score;
+      
+      String recentChangeText = '';
+      Color recentChangeColor = theme.textTheme.bodyMedium?.color ?? Colors.black;
+      if (logs.length >= 2) {
+        final previousScore = logs[1].score;
+        final difference = latestScore - previousScore;
+        if (difference > 0) {
+          recentChangeText = '+$difference점 (직전 시험 대비)';
+          recentChangeColor = const Color(0xFF2E7D32); // Green
+        } else if (difference < 0) {
+          recentChangeText = '$difference점 (직전 시험 대비)';
+          recentChangeColor = const Color(0xFFC62828); // Red
+        } else {
+          recentChangeText = '0점 변동 없음 (직전 시험 대비)';
+          recentChangeColor = Colors.grey.shade600;
+        }
+      }
+
+      final chronologicalLogs = logs.reversed.toList();
+      final spots = chronologicalLogs.asMap().entries.map((entry) {
+        return FlSpot(entry.key.toDouble(), entry.value.score.toDouble());
+      }).toList();
+
+      final barData = LineChartBarData(
+        spots: spots,
+        isCurved: false,
+        color: theme.colorScheme.primary,
+        barWidth: 3,
+        isStrokeCapRound: true,
+        dotData: FlDotData(
+          show: true,
+          getDotPainter: (spot, percent, barData, index) => FlDotCirclePainter(
+            radius: 4.5,
+            color: theme.colorScheme.primary,
+            strokeWidth: 2,
+            strokeColor: Colors.white,
+          ),
+        ),
+        belowBarData: BarAreaData(
+          show: true,
+          color: theme.colorScheme.primary.withOpacity(0.08),
+        ),
+      );
+
+      graphWidget = Padding(
+        padding: const EdgeInsets.only(bottom: 16),
+        child: MathCard(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              '성적 추이 그래프',
+              style: theme.textTheme.titleMedium?.copyWith(
                 fontWeight: FontWeight.bold,
               ),
             ),
+            const SizedBox(height: 24),
+            SizedBox(
+              height: 200,
+              child: LineChart(
+                LineChartData(
+                  gridData: FlGridData(
+                    show: true,
+                    drawVerticalLine: false,
+                    horizontalInterval: 20,
+                    getDrawingHorizontalLine: (value) => FlLine(
+                      color: isDark ? Colors.white10 : Colors.black12,
+                      strokeWidth: 0.8,
+                    ),
+                  ),
+                  titlesData: FlTitlesData(
+                    show: true,
+                    topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                    rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                    leftTitles: AxisTitles(
+                      sideTitles: SideTitles(
+                        showTitles: true,
+                        interval: 20,
+                        getTitlesWidget: (value, meta) => SideTitleWidget(
+                          axisSide: meta.axisSide,
+                          child: Text(
+                            '${value.toInt()}',
+                            style: theme.textTheme.bodySmall?.copyWith(fontSize: 10),
+                          ),
+                        ),
+                        reservedSize: 28,
+                      ),
+                    ),
+                    bottomTitles: AxisTitles(
+                      sideTitles: SideTitles(
+                        showTitles: true,
+                        getTitlesWidget: (value, meta) {
+                          final idx = value.toInt();
+                          if (idx >= 0 && idx < chronologicalLogs.length) {
+                            final title = chronologicalLogs[idx].title;
+                            final shortenedTitle = title.length > 5 ? '${title.substring(0, 4)}..' : title;
+                            return SideTitleWidget(
+                              axisSide: meta.axisSide,
+                              child: Text(
+                                shortenedTitle,
+                                style: theme.textTheme.bodySmall?.copyWith(fontSize: 9),
+                              ),
+                            );
+                          }
+                          return const SizedBox.shrink();
+                        },
+                        reservedSize: 22,
+                        interval: 1,
+                      ),
+                    ),
+                  ),
+                  borderData: FlBorderData(
+                    show: true,
+                    border: Border(
+                      bottom: BorderSide(color: isDark ? Colors.white10 : Colors.black12, width: 1),
+                      left: BorderSide(color: isDark ? Colors.white10 : Colors.black12, width: 1),
+                    ),
+                  ),
+                  minX: 0,
+                  maxX: (chronologicalLogs.length - 1).toDouble(),
+                  minY: 0,
+                  maxY: 100,
+                  lineBarsData: [barData],
+                  lineTouchData: LineTouchData(
+                    enabled: false,
+                    handleBuiltInTouches: false,
+                    touchTooltipData: LineTouchTooltipData(
+                      getTooltipColor: (spot) => Colors.transparent,
+                      tooltipRoundedRadius: 0,
+                      tooltipPadding: EdgeInsets.zero,
+                      tooltipMargin: 8,
+                      getTooltipItems: (List<LineBarSpot> touchedSpots) {
+                        return touchedSpots.map((spot) {
+                          return LineTooltipItem(
+                            '${spot.y.toInt()}점',
+                            TextStyle(
+                              color: theme.colorScheme.primary,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 11,
+                            ),
+                          );
+                        }).toList();
+                      },
+                    ),
+                  ),
+                  showingTooltipIndicators: spots.map((spot) {
+                    return ShowingTooltipIndicators([
+                      LineBarSpot(barData, 0, spot),
+                    ]);
+                  }).toList(),
+                  extraLinesData: ExtraLinesData(
+                    horizontalLines: [
+                      HorizontalLine(
+                        y: avgScore,
+                        color: Colors.grey.withOpacity(0.5),
+                        strokeWidth: 1.2,
+                        dashArray: [4, 4],
+                        label: HorizontalLineLabel(
+                          show: true,
+                          alignment: Alignment.topRight,
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: Colors.grey.shade600,
+                            fontSize: 10,
+                            fontWeight: FontWeight.bold,
+                          ),
+                          labelResolver: (line) => '평균: ${avgScore.toStringAsFixed(1)}점',
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 24),
+            const Divider(),
+            const SizedBox(height: 12),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceAround,
+              children: [
+                _buildStatItem(context, '평균 점수', '${avgScore.toStringAsFixed(1)}점'),
+                _buildStatItem(context, '최고 점수', '${highestScore}점'),
+                _buildStatItem(context, '최저 점수', '${lowestScore}점'),
+              ],
+            ),
+            if (recentChangeText.isNotEmpty) ...[
+              const SizedBox(height: 16),
+              Center(
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: recentChangeColor.withOpacity(0.08),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Text(
+                    recentChangeText,
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: recentChangeColor,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      children: [
+        graphWidget,
+        Padding(
+          padding: const EdgeInsets.only(left: 4.0, bottom: 8.0, top: 8.0),
+          child: Text(
+            '시험 기록 목록',
+            style: theme.textTheme.titleMedium?.copyWith(
+              fontWeight: FontWeight.bold,
+            ),
           ),
-        );
-      },
+        ),
+        ...logs.map((log) {
+          return Card(
+            margin: const EdgeInsets.only(bottom: 8),
+            child: ListTile(
+              title: Text(
+                log.title,
+                style: theme.textTheme.bodyLarge?.copyWith(fontWeight: FontWeight.bold),
+              ),
+              subtitle: Text('날짜: ${log.date}'),
+              trailing: Text(
+                '${log.score}점',
+                style: theme.textTheme.titleLarge?.copyWith(
+                  color: theme.colorScheme.primary,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+          );
+        }).toList(),
+      ],
+    );
+  }
+
+  Widget _buildStatItem(BuildContext context, String label, String value) {
+    final theme = Theme.of(context);
+    return Column(
+      children: [
+        Text(
+          label,
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: Colors.grey.shade600,
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          value,
+          style: theme.textTheme.bodyLarge?.copyWith(
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+      ],
     );
   }
 

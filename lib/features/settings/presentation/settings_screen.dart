@@ -272,60 +272,151 @@ class _ScheduleCalendarTabState extends ConsumerState<_ScheduleCalendarTab> {
   }
 
   void _deleteSchedule(String id) async {
-    await ref.read(settingsRepositoryProvider).deleteSchedule(id);
-    ref.invalidate(dateSchedulesStreamProvider);
-    ref.invalidate(allSchedulesStreamProvider);
-  }
-
-  void _showAddScheduleDialog(BuildContext context, String defaultDate) {
+     void _showAddScheduleDialog(BuildContext context, String defaultDate) {
     final titleController = TextEditingController();
     final memoController = TextEditingController();
     String selectedType = 'CONSULT'; // Default
-
+    DateTime startDate = DateTime.parse(defaultDate);
+    DateTime endDate = DateTime.parse(defaultDate);
+ 
     showDialog(
       context: context,
       builder: (context) {
         return StatefulBuilder(
           builder: (context, setStateDialog) {
+            final theme = Theme.of(context);
             return AlertDialog(
               title: const Text('신규 일정 추가'),
-              content: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  TextField(
-                    controller: titleController,
-                    decoration: const InputDecoration(
-                      labelText: '일정명',
-                      hintText: '예: 기말고사 피드백 상담',
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    TextField(
+                      controller: titleController,
+                      decoration: const InputDecoration(
+                        labelText: '일정명',
+                        hintText: '예: 기말고사 피드백 상담',
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 12),
-                  DropdownButtonFormField<String>(
-                    value: selectedType,
-                    decoration: const InputDecoration(labelText: '일정 분류'),
-                    items: const [
-                      DropdownMenuItem(value: 'EXAM', child: Text('시험 일정')),
-                      DropdownMenuItem(value: 'LEAVE', child: Text('휴원 일정')),
-                      DropdownMenuItem(value: 'CONSULT', child: Text('상담 일정')),
-                      DropdownMenuItem(value: 'OTHER', child: Text('기타 일정')),
-                    ],
-                    onChanged: (val) {
-                      if (val != null) {
-                        setStateDialog(() {
-                          selectedType = val;
-                        });
-                      }
-                    },
-                  ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: memoController,
-                    decoration: const InputDecoration(
-                      labelText: '상세 내용 (선택)',
-                      hintText: '예: 학부모 동반 참석',
+                    const SizedBox(height: 12),
+                    DropdownButtonFormField<String>(
+                      value: selectedType,
+                      decoration: const InputDecoration(labelText: '일정 분류'),
+                      items: const [
+                        DropdownMenuItem(value: 'EXAM', child: Text('시험 일정')),
+                        DropdownMenuItem(value: 'LEAVE', child: Text('휴원 일정')),
+                        DropdownMenuItem(value: 'CONSULT', child: Text('상담 일정')),
+                        DropdownMenuItem(value: 'OTHER', child: Text('기타 일정')),
+                      ],
+                      onChanged: (val) {
+                        if (val != null) {
+                          setStateDialog(() {
+                            selectedType = val;
+                          });
+                        }
+                      },
                     ),
-                  ),
-                ],
+                    const SizedBox(height: 16),
+                    Text(
+                      '일정 기간 설정',
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton(
+                            style: OutlinedButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(vertical: 12),
+                            ),
+                            onPressed: () async {
+                              final picked = await showDatePicker(
+                                context: context,
+                                initialDate: startDate,
+                                firstDate: DateTime(2020),
+                                lastDate: DateTime(2030),
+                                locale: const Locale('ko', 'KR'),
+                              );
+                              if (picked != null) {
+                                setStateDialog(() {
+                                  startDate = picked;
+                                  if (endDate.isBefore(startDate)) {
+                                    endDate = startDate;
+                                  }
+                                });
+                              }
+                            },
+                            child: Column(
+                              children: [
+                                const Text('시작일', style: TextStyle(fontSize: 10)),
+                                const SizedBox(height: 2),
+                                Text(
+                                  DateFormat('yyyy-MM-dd').format(startDate),
+                                  style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: OutlinedButton(
+                            style: OutlinedButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(vertical: 12),
+                            ),
+                            onPressed: () async {
+                              final picked = await showDatePicker(
+                                context: context,
+                                initialDate: endDate,
+                                firstDate: startDate,
+                                lastDate: DateTime(2030),
+                                locale: const Locale('ko', 'KR'),
+                              );
+                              if (picked != null) {
+                                setStateDialog(() {
+                                  endDate = picked;
+                                });
+                              }
+                            },
+                            child: Column(
+                              children: [
+                                const Text('종료일', style: TextStyle(fontSize: 10)),
+                                const SizedBox(height: 2),
+                                Text(
+                                  DateFormat('yyyy-MM-dd').format(endDate),
+                                  style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 10),
+                    Center(
+                      child: Text(
+                        startDate == endDate
+                            ? '선택된 날짜: ${DateFormat('yyyy-MM-dd').format(startDate)} (1일간)'
+                            : '선택된 기간: ${DateFormat('yyyy-MM-dd').format(startDate)} ~ ${DateFormat('yyyy-MM-dd').format(endDate)} (${endDate.difference(startDate).inDays + 1}일간)',
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: theme.colorScheme.primary,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: memoController,
+                      decoration: const InputDecoration(
+                        labelText: '상세 내용 (선택)',
+                        hintText: '예: 학부모 동반 참석',
+                      ),
+                    ),
+                  ],
+                ),
               ),
               actions: [
                 TextButton(
@@ -336,14 +427,21 @@ class _ScheduleCalendarTabState extends ConsumerState<_ScheduleCalendarTab> {
                   onPressed: () async {
                     final title = titleController.text.trim();
                     if (title.isEmpty) return;
-
-                    await ref.read(settingsRepositoryProvider).addSchedule(
-                      title: title,
-                      date: defaultDate,
-                      type: selectedType,
-                      memo: memoController.text.trim().isEmpty ? null : memoController.text.trim(),
-                    );
-
+ 
+                    final List<Future<void>> futures = [];
+                    final daysCount = endDate.difference(startDate).inDays;
+                    for (int i = 0; i <= daysCount; i++) {
+                      final targetDate = startDate.add(Duration(days: i));
+                      final dateStr = DateFormat('yyyy-MM-dd').format(targetDate);
+                      futures.add(ref.read(settingsRepositoryProvider).addSchedule(
+                        title: title,
+                        date: dateStr,
+                        type: selectedType,
+                        memo: memoController.text.trim().isEmpty ? null : memoController.text.trim(),
+                      ));
+                    }
+                    await Future.wait(futures);
+ 
                     ref.invalidate(dateSchedulesStreamProvider);
                     ref.invalidate(allSchedulesStreamProvider);
                     Navigator.pop(context);
@@ -591,6 +689,16 @@ class _SystemSettingsTab extends ConsumerWidget {
                         );
                       },
                     ),
+                  ),
+                  const Divider(height: 1),
+                  ListTile(
+                    leading: const Icon(Icons.arrow_upward),
+                    title: const Text('학년 일괄 진급'),
+                    subtitle: const Text('새 학기를 맞아 모든 학생들의 학년을 한 단계씩 올립니다.'),
+                    trailing: const Icon(Icons.chevron_right),
+                    onTap: () {
+                      context.push('/settings/promote');
+                    },
                   ),
                   const Divider(height: 1),
                   const ListTile(

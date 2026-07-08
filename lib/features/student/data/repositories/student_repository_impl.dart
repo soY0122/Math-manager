@@ -16,8 +16,10 @@ class StudentRepositoryImpl implements StudentRepository {
     final examRecordsStream = FirebaseFirestore.instance.collection('exam_records').snapshots();
     final attendancesStream = FirebaseFirestore.instance.collection('attendances').snapshots();
     final homeworksStream = FirebaseFirestore.instance.collection('homeworks').snapshots();
+    final examsStream = FirebaseFirestore.instance.collection('exams').snapshots();
 
-    return Rx.combineLatest4<
+    return Rx.combineLatest5<
+        QuerySnapshot<Map<String, dynamic>>,
         QuerySnapshot<Map<String, dynamic>>,
         QuerySnapshot<Map<String, dynamic>>,
         QuerySnapshot<Map<String, dynamic>>,
@@ -27,13 +29,15 @@ class StudentRepositoryImpl implements StudentRepository {
       examRecordsStream,
       attendancesStream,
       homeworksStream,
-      (studentsSnap, recordsSnap, attendancesSnap, homeworksSnap) {
+      examsStream,
+      (studentsSnap, recordsSnap, attendancesSnap, homeworksSnap, examsSnap) {
         final List<StudentStats> list = [];
 
         final allStudents = studentsSnap.docs;
         final allRecords = recordsSnap.docs.map((doc) => doc.data()).toList();
         final allAttendances = attendancesSnap.docs.map((doc) => doc.data()).toList();
         final allHomeworks = homeworksSnap.docs.map((doc) => doc.data()).toList();
+        final allExams = examsSnap.docs.map((doc) => doc.data()..['docId'] = doc.id).toList();
 
         for (final doc in allStudents) {
           final s = doc.data();
@@ -132,6 +136,50 @@ class StudentRepositoryImpl implements StudentRepository {
             growthTrend = '▼ 하락 중';
           }
 
+          // Calculate riskScore
+          final List<Map<String, dynamic>> attLogsForRisk = [];
+          for (final a in studentAttsAll) {
+            final dateTs = a['date'] as Timestamp?;
+            if (dateTs == null) continue;
+            attLogsForRisk.add({
+              'date': dateTs.toDate(),
+              'status': a['status'] as String? ?? 'ATTENDANCE',
+            });
+          }
+
+          final List<Map<String, dynamic>> hwLogsForRisk = [];
+          for (final h in studentHws) {
+            final dateTs = h['date'] as Timestamp?;
+            if (dateTs == null) continue;
+            hwLogsForRisk.add({
+              'date': dateTs.toDate(),
+              'status': h['status'] as String? ?? 'INCOMPLETE',
+            });
+          }
+
+          final List<Map<String, dynamic>> examLogsForRisk = [];
+          for (final r in studentScores) {
+            final examId = r['examId'] as String?;
+            final score = r['score'] as int? ?? 0;
+            final examDoc = allExams.firstWhere((e) => e['docId'] == examId, orElse: () => <String, dynamic>{});
+            final examDateTs = examDoc['date'] as Timestamp?;
+            if (examDateTs == null) continue;
+            examLogsForRisk.add({
+              'date': examDateTs.toDate(),
+              'score': score,
+            });
+          }
+
+          final DateTime? regDate = regTimestamp?.toDate();
+          final riskRes = StudentRiskCalculator.calculate(
+            evaluationDate: DateTime.now(),
+            registrationDate: regDate,
+            attendanceLogs: attLogsForRisk,
+            homeworkLogs: hwLogsForRisk,
+            examLogs: examLogsForRisk,
+          );
+          final riskScore = riskRes.score;
+
           list.add(StudentStats(
             id: id,
             name: name,
@@ -148,6 +196,7 @@ class StudentRepositoryImpl implements StudentRepository {
             growthTrend: growthTrend,
             attendanceRate: attendanceRate,
             homeworkCompletionRate: homeworkRate,
+            riskScore: riskScore,
           ));
         }
 
@@ -314,11 +363,55 @@ class StudentRepositoryImpl implements StudentRepository {
         consultingLogs.sort((a, b) => b.date.compareTo(a.date));
 
         // 5. Evaluate AI
+        final List<Map<String, dynamic>> attLogsForRisk = [];
+        for (final a in studentAtts) {
+          final dateTs = a['date'] as Timestamp?;
+          if (dateTs == null) continue;
+          attLogsForRisk.add({
+            'date': dateTs.toDate(),
+            'status': a['status'] as String? ?? 'ATTENDANCE',
+          });
+        }
+
+        final List<Map<String, dynamic>> hwLogsForRisk = [];
+        for (final h in studentHws) {
+          final dateTs = h['date'] as Timestamp?;
+          if (dateTs == null) continue;
+          hwLogsForRisk.add({
+            'date': dateTs.toDate(),
+            'status': h['status'] as String? ?? 'INCOMPLETE',
+          });
+        }
+
+        final List<Map<String, dynamic>> examLogsForRisk = [];
+        for (final r in studentRecords) {
+          final examId = r['examId'] as String?;
+          final score = r['score'] as int? ?? 0;
+          final examDoc = allExams.firstWhere((e) => e['docId'] == examId, orElse: () => <String, dynamic>{});
+          final examDateTs = examDoc['date'] as Timestamp?;
+          if (examDateTs == null) continue;
+          examLogsForRisk.add({
+            'date': examDateTs.toDate(),
+            'score': score,
+          });
+        }
+
+        final DateTime? regDate = regTimestamp?.toDate();
+        final riskRes = StudentRiskCalculator.calculate(
+          evaluationDate: DateTime.now(),
+          registrationDate: regDate,
+          attendanceLogs: attLogsForRisk,
+          homeworkLogs: hwLogsForRisk,
+          examLogs: examLogsForRisk,
+        );
+
         final scoresList = examLogs.reversed.map((e) => e.score).toList();
-        final ai = StudentEvaluator.evaluate(
+        final ai = StudentEvaluator.evaluateWithRisk(
           scores: scoresList,
           attendanceStatuses: attendanceLogs.reversed.map((a) => a.status).toList(),
           homeworkStatuses: homeworkLogs.reversed.map((h) => h.status).toList(),
+          riskScore: riskRes.score,
+          triggers: riskRes.triggers,
         );
 
         int presentCount = 0;
@@ -361,6 +454,7 @@ class StudentRepositoryImpl implements StudentRepository {
           growthTrend: '-',
           attendanceRate: attendanceRate,
           homeworkCompletionRate: homeworkRate,
+          riskScore: riskRes.score,
         );
 
         return StudentDetailData(

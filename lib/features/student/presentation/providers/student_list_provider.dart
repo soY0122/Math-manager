@@ -54,7 +54,7 @@ final studentsStreamProvider = StreamProvider<List<StudentStats>>((ref) {
 
     if (filter == 'at_risk') {
       return students.where((s) {
-        return s.growthRate < -5.0 || s.attendanceRate < 0.85 || s.homeworkCompletionRate < 0.70;
+        return s.riskScore >= 4;
       }).toList();
     }
 

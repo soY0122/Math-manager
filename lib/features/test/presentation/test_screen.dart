@@ -57,6 +57,14 @@ class TestScreen extends ConsumerWidget {
             spots.add(FlSpot(i.toDouble(), graphExams[i].averageScore));
           }
 
+          // Build listExams for the list view below the graph
+          final listExams = List<ExamOverview>.from(graphExams);
+          if (sortNewest) {
+            listExams.sort((a, b) => b.date.compareTo(a.date));
+          } else {
+            listExams.sort((a, b) => a.date.compareTo(b.date));
+          }
+
           return SafeArea(
             child: SingleChildScrollView(
               padding: const EdgeInsets.all(16.0),
@@ -242,20 +250,20 @@ class TestScreen extends ConsumerWidget {
                   ),
                   const SizedBox(height: 8),
 
-                  if (exams.isEmpty)
+                  if (listExams.isEmpty)
                     const Padding(
                       padding: EdgeInsets.symmetric(vertical: 36.0),
                       child: Center(
-                        child: Text('기록된 시험이 없습니다.'),
+                        child: Text('선택한 학년에 기록된 시험이 없습니다.'),
                       ),
                     )
                   else
                     ListView.builder(
                       shrinkWrap: true,
                       physics: const NeverScrollableScrollPhysics(),
-                      itemCount: exams.length,
+                      itemCount: listExams.length,
                       itemBuilder: (context, index) {
-                        final exam = exams[index];
+                        final exam = listExams[index];
                         return Padding(
                           padding: const EdgeInsets.only(bottom: 12.0),
                           child: _buildExamCard(context, ref, exam),

@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 import 'package:rxdart/rxdart.dart';
 import '../../domain/models/dashboard_stats.dart';
 import '../../domain/repositories/home_repository.dart';
+import '../../../../core/utils/student_evaluator.dart';
 
 class HomeRepositoryImpl implements HomeRepository {
   HomeRepositoryImpl();
@@ -16,8 +17,10 @@ class HomeRepositoryImpl implements HomeRepository {
     final attendancesStream = FirebaseFirestore.instance.collection('attendances').snapshots();
     final homeworksStream = FirebaseFirestore.instance.collection('homeworks').snapshots();
     final examRecordsStream = FirebaseFirestore.instance.collection('exam_records').snapshots();
+    final examsStream = FirebaseFirestore.instance.collection('exams').snapshots();
 
-    return Rx.combineLatest4<
+    return Rx.combineLatest5<
+        QuerySnapshot<Map<String, dynamic>>,
         QuerySnapshot<Map<String, dynamic>>,
         QuerySnapshot<Map<String, dynamic>>,
         QuerySnapshot<Map<String, dynamic>>,
@@ -27,7 +30,8 @@ class HomeRepositoryImpl implements HomeRepository {
       attendancesStream,
       homeworksStream,
       examRecordsStream,
-      (studentsSnap, attendancesSnap, homeworksSnap, examRecordsSnap) {
+      examsStream,
+      (studentsSnap, attendancesSnap, homeworksSnap, examRecordsSnap, examsSnap) {
         final today = DateTime.now();
         final targetTimestamp = Timestamp.fromDate(DateTime(today.year, today.month, today.day));
         final todayStr = DateFormat('yyyy-MM-dd').format(today);
@@ -36,6 +40,7 @@ class HomeRepositoryImpl implements HomeRepository {
         final allAttendances = attendancesSnap.docs.map((doc) => doc.data()).toList();
         final allHomeworks = homeworksSnap.docs.map((doc) => doc.data()).toList();
         final allRecords = examRecordsSnap.docs.map((doc) => doc.data()).toList();
+        final allExams = examsSnap.docs.map((doc) => doc.data()..['docId'] = doc.id).toList();
 
         var activeStudents = allStudents.where((s) => s['isActive'] == true).toList();
         if (gradeFilter != null) {
@@ -159,27 +164,53 @@ class HomeRepositoryImpl implements HomeRepository {
           ));
 
           // Evaluate risk
+          final regTimestamp = s['registrationDate'] as Timestamp?;
+          final DateTime? regDate = regTimestamp?.toDate();
+
           final studentAttsLog = allAttendances.where((a) => a['studentId'] == id).toList();
-          int sPresent = 0;
-          int sLate = 0;
-          for (final att in studentAttsLog) {
-            final status = att['status'] as String;
-            if (status == 'ATTENDANCE') sPresent++;
-            if (status == 'LATE') sLate++;
+          final List<Map<String, dynamic>> attLogsForRisk = [];
+          for (final a in studentAttsLog) {
+            final dateTs = a['date'] as Timestamp?;
+            if (dateTs == null) continue;
+            attLogsForRisk.add({
+              'date': dateTs.toDate(),
+              'status': a['status'] as String? ?? 'ATTENDANCE',
+            });
           }
-          final double sAttRate = studentAttsLog.isNotEmpty ? (sPresent + sLate) / studentAttsLog.length : 1.0;
 
           final studentHwsLog = allHomeworks.where((h) => h['studentId'] == id).toList();
-          int sCompleted = 0;
-          int sPartial = 0;
-          for (final hw in studentHwsLog) {
-            final status = hw['status'] as String;
-            if (status == 'COMPLETED') sCompleted++;
-            if (status == 'PARTIAL') sPartial++;
+          final List<Map<String, dynamic>> hwLogsForRisk = [];
+          for (final h in studentHwsLog) {
+            final dateTs = h['date'] as Timestamp?;
+            if (dateTs == null) continue;
+            hwLogsForRisk.add({
+              'date': dateTs.toDate(),
+              'status': h['status'] as String? ?? 'INCOMPLETE',
+            });
           }
-          final double sHwRate = studentHwsLog.isNotEmpty ? (sCompleted + (sPartial * 0.5)) / studentHwsLog.length : 1.0;
 
-          if (growthRate < -5.0 || sAttRate < 0.85 || sHwRate < 0.70) {
+          final List<Map<String, dynamic>> examLogsForRisk = [];
+          for (final r in studentScores) {
+            final examId = r['examId'] as String?;
+            final score = r['score'] as int? ?? 0;
+            final examDoc = allExams.firstWhere((e) => e['docId'] == examId, orElse: () => <String, dynamic>{});
+            final examDateTs = examDoc['date'] as Timestamp?;
+            if (examDateTs == null) continue;
+            examLogsForRisk.add({
+              'date': examDateTs.toDate(),
+              'score': score,
+            });
+          }
+
+          final riskRes = StudentRiskCalculator.calculate(
+            evaluationDate: DateTime.now(),
+            registrationDate: regDate,
+            attendanceLogs: attLogsForRisk,
+            homeworkLogs: hwLogsForRisk,
+            examLogs: examLogsForRisk,
+          );
+
+          if (riskRes.score >= 4) {
             dangerCount++;
           }
         }
@@ -230,7 +261,7 @@ class HomeRepositoryImpl implements HomeRepository {
         recent.sort((a, b) => b.description.compareTo(a.description));
 
         final String aiSummary = dangerCount > 0
-            ? '최근 시험 성적 분석 결과, 성적이 고속 상승 중인 학생이 ${risingCount}명 관찰되었으나, 최근 과제 미완료 및 지각 누적으로 출결/학습 리스크가 높은 학생이 ${dangerCount}명 존재합니다. 개별 클리닉을 권장합니다.'
+            ? '최근 시험 성적 분석 결과 성적이 고속 상승 중인 학생이 ${risingCount}명 관찰되었으나, 최근 출결 및 학습 패턴에 변화가 감지되어 추가 모니터링 및 개별 보강 지도 지원이 권장되는 집중 관리 학생이 ${dangerCount}명 존재합니다.'
             : '전체 재원생들의 평균 성적이 안정적으로 상승하고 있으며, 이번 달 출석률 ${(monthlyAttendanceRate * 100).toStringAsFixed(0)}%로 양호합니다. 과제 완료 상태도 성실히 유지되고 있습니다.';
 
         return DashboardStats(

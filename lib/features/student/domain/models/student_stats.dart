@@ -14,6 +14,7 @@ class StudentStats {
   final String growthTrend; // "상승 중", "하락 중", "유지"
   final double attendanceRate;
   final double homeworkCompletionRate;
+  final int riskScore;
 
   const StudentStats({
     required this.id,
@@ -31,5 +32,6 @@ class StudentStats {
     required this.growthTrend,
     required this.attendanceRate,
     required this.homeworkCompletionRate,
+    required this.riskScore,
   });
 }

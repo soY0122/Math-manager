@@ -14,6 +14,7 @@ import '../../features/test/presentation/test_add_screen.dart';
 import '../../features/test/presentation/test_score_input_screen.dart';
 import '../../features/homework/presentation/homework_screen.dart';
 import '../../features/settings/presentation/settings_screen.dart';
+import '../../features/settings/presentation/promotion_screen.dart';
 import '../widgets/scaffold_with_nav_bar.dart';
 import '../widgets/math_loader.dart';
 
@@ -72,6 +73,11 @@ final routerProvider = Provider<GoRouter>((ref) {
         path: '/grades/add-exam',
         parentNavigatorKey: rootNavigatorKey,
         builder: (context, state) => const TestAddScreen(),
+      ),
+      GoRoute(
+        path: '/settings/promote',
+        parentNavigatorKey: rootNavigatorKey,
+        builder: (context, state) => const PromotionScreen(),
       ),
       GoRoute(
         path: '/grades/score-input/:id',

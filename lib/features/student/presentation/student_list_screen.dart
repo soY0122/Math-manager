@@ -397,7 +397,7 @@ class _StudentListScreenState extends ConsumerState<StudentListScreen> {
       case 'homework_incomplete':
         return '오늘 숙제 미완료 학생';
       case 'at_risk':
-        return '위험 학생군';
+        return '집중 관리 필요 학생';
       default:
         return '필터링 적용 중';
     }
