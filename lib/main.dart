@@ -16,6 +16,17 @@ void main() async {
     options: DefaultFirebaseOptions.currentPlatform,
   );
 
+  // Print Firebase configuration to the browser console for deployment debugging
+  try {
+    final appOptions = Firebase.app().options;
+    print('DEBUG FIREBASE CONFIG:');
+    print('projectId: ${appOptions.projectId}');
+    print('apiKey: ${appOptions.apiKey}');
+    print('authDomain: ${appOptions.authDomain}');
+  } catch (e) {
+    print('DEBUG FIREBASE CONFIG ERROR: $e');
+  }
+
   // Initialize Korean date formatting
   await initializeDateFormatting('ko_KR', null);
 

@@ -102,19 +102,18 @@ class AuthNotifier extends StateNotifier<AuthState> {
     try {
       await _auth.signInWithEmailAndPassword(email: email, password: password);
       return true;
-    } on FirebaseAuthException catch (e) {
-      String message = '로그인에 실패했습니다.';
-      if (e.code == 'user-not-found' || e.code == 'wrong-password' || e.code == 'invalid-credential') {
-        message = '이메일 또는 비밀번호가 올바르지 않습니다.';
-      } else if (e.code == 'invalid-email') {
-        message = '유효하지 않은 이메일 형식입니다.';
-      } else if (e.code == 'user-disabled') {
-        message = '비활성화된 계정입니다.';
-      }
+    } on FirebaseAuthException catch (e, stackTrace) {
+      print('DEBUG AUTH EXCEPTION: Code: ${e.code}, Message: ${e.message}');
+      print(stackTrace);
+
+      final message = 'FirebaseAuthException: [${e.code}] ${e.message}';
       state = state.copyWith(isLoading: false, errorMessage: message);
       return false;
-    } catch (e) {
-      state = state.copyWith(isLoading: false, errorMessage: e.toString());
+    } catch (e, stackTrace) {
+      print('DEBUG GENERIC AUTH EXCEPTION: $e');
+      print(stackTrace);
+
+      state = state.copyWith(isLoading: false, errorMessage: 'Exception: ${e.toString()}');
       return false;
     }
   }
