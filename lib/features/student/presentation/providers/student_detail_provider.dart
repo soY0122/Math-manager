@@ -6,3 +6,5 @@ final studentDetailStreamProvider = StreamProvider.family<StudentDetailData, Str
   final repository = ref.watch(studentRepositoryProvider);
   return repository.watchStudentDetail(id);
 });
+
+final studentDetailGroupFilterProvider = StateProvider.family<String?, String>((ref, id) => null);

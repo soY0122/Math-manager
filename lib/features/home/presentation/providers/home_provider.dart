@@ -12,6 +12,8 @@ final homeRepositoryProvider = Provider<HomeRepository>((ref) {
   return HomeRepositoryImpl();
 });
 
+final dashboardExamGroupFilterProvider = StateProvider<String?>((ref) => null);
+
 final dashboardStatsProvider = StreamProvider<DashboardStats>((ref) {
   ref.watch(studentsStreamProvider).maybeWhen(orElse: () => null);
   ref.watch(attendanceStreamProvider).maybeWhen(orElse: () => null);
@@ -20,5 +22,6 @@ final dashboardStatsProvider = StreamProvider<DashboardStats>((ref) {
 
   final repository = ref.watch(homeRepositoryProvider);
   final grade = ref.watch(globalGradeFilterProvider);
-  return repository.watchDashboardStats(grade);
+  final examGroupId = ref.watch(dashboardExamGroupFilterProvider);
+  return repository.watchDashboardStats(grade, examGroupId);
 });

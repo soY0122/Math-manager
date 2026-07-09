@@ -17,5 +17,5 @@ abstract class SettingsRepository {
     String? memo,
   });
   Future<void> deleteSchedule(String id);
-  Stream<AcademyStats> watchAcademyStats({int? gradeFilter});
+  Stream<AcademyStats> watchAcademyStats({int? gradeFilter, String? examGroupId});
 }

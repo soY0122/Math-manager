@@ -94,7 +94,7 @@ class SettingsRepositoryImpl implements SettingsRepository {
   }
 
   @override
-  Stream<AcademyStats> watchAcademyStats({int? gradeFilter}) {
+  Stream<AcademyStats> watchAcademyStats({int? gradeFilter, String? examGroupId}) {
     final studentsStream = FirebaseFirestore.instance.collection('students').snapshots();
     final examRecordsStream = FirebaseFirestore.instance.collection('exam_records').snapshots();
     final attendancesStream = FirebaseFirestore.instance.collection('attendances').snapshots();
@@ -116,10 +116,19 @@ class SettingsRepositoryImpl implements SettingsRepository {
       (studentsSnap, examRecordsSnap, attendancesSnap, homeworksSnap, examsSnap) {
         final allStudentsDocs = studentsSnap.docs;
         final allStudents = allStudentsDocs.map((doc) => doc.data()..['docId'] = doc.id).toList();
-        final allRecords = examRecordsSnap.docs.map((doc) => doc.data()).toList();
         final allAttendances = attendancesSnap.docs.map((doc) => doc.data()).toList();
         final allHomeworks = homeworksSnap.docs.map((doc) => doc.data()).toList();
-        final allExams = examsSnap.docs.map((doc) => doc.data()..['docId'] = doc.id).toList();
+        
+        final rawRecords = examRecordsSnap.docs.map((doc) => doc.data()).toList();
+        final rawExams = examsSnap.docs.map((doc) => doc.data()..['docId'] = doc.id).toList();
+
+        final allExams = (examGroupId != null && examGroupId.isNotEmpty)
+            ? rawExams.where((e) => e['examGroupId'] == examGroupId).toList()
+            : rawExams;
+        final allExamIds = allExams.map((e) => e['docId'] as String).toSet();
+        final allRecords = (examGroupId != null && examGroupId.isNotEmpty)
+            ? rawRecords.where((r) => allExamIds.contains(r['examId'] as String? ?? '')).toList()
+            : rawRecords;
 
         final activeStudents = allStudents.where((s) => s['isActive'] == true).toList();
 
@@ -196,6 +205,10 @@ class SettingsRepositoryImpl implements SettingsRepository {
           final studentScores = allRecords
               .where((r) => r['studentId'] == studentId)
               .toList();
+
+          if (examGroupId != null && examGroupId.isNotEmpty && studentScores.isEmpty) {
+            continue;
+          }
 
           final growthRes = StudentGrowthCalculator.calculate(
             studentRecords: studentScores,

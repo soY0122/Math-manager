@@ -6,6 +6,7 @@ import '../../domain/models/student_stats.dart';
 import '../../domain/models/student_detail_data.dart';
 import '../../domain/repositories/student_repository.dart';
 import '../../../../core/utils/student_evaluator.dart';
+import '../../../test/domain/models/exam_group_models.dart';
 
 class StudentRepositoryImpl implements StudentRepository {
   StudentRepositoryImpl();
@@ -227,9 +228,11 @@ class StudentRepositoryImpl implements StudentRepository {
         .collection('schedules')
         .where('type', isEqualTo: 'CONSULT')
         .snapshots();
+    final examGroupsStream = FirebaseFirestore.instance.collection('exam_groups').snapshots();
 
-    return Rx.combineLatest6<
+    return Rx.combineLatest7<
         DocumentSnapshot<Map<String, dynamic>>,
+        QuerySnapshot<Map<String, dynamic>>,
         QuerySnapshot<Map<String, dynamic>>,
         QuerySnapshot<Map<String, dynamic>>,
         QuerySnapshot<Map<String, dynamic>>,
@@ -242,7 +245,8 @@ class StudentRepositoryImpl implements StudentRepository {
       homeworksStream,
       examsStream,
       schedulesStream,
-      (studentSnap, recordsSnap, attendancesSnap, homeworksSnap, examsSnap, schedulesSnap) {
+      examGroupsStream,
+      (studentSnap, recordsSnap, attendancesSnap, homeworksSnap, examsSnap, schedulesSnap, groupsSnap) {
         if (!studentSnap.exists) {
           throw Exception('Student not found: $studentId');
         }
@@ -265,6 +269,9 @@ class StudentRepositoryImpl implements StudentRepository {
 
         final allExams = examsSnap.docs.map((doc) => doc.data()..['docId'] = doc.id).toList();
         final allRecords = recordsSnap.docs.map((doc) => doc.data()).toList();
+        final allGroups = groupsSnap.docs
+            .map((doc) => ExamGroup.fromMap(doc.id, doc.data()))
+            .toList();
         final allAttendances = attendancesSnap.docs.map((doc) {
           final data = doc.data();
           final sId = data['studentId'] as String?;
@@ -290,10 +297,18 @@ class StudentRepositoryImpl implements StudentRepository {
           final exam = allExams.firstWhere((e) => e['docId'] == examId, orElse: () => <String, dynamic>{});
           if (exam.isNotEmpty) {
             final examDateTs = exam['date'] as Timestamp?;
+            final examGroupId = exam['examGroupId'] as String? ?? '';
+            final group = allGroups.firstWhere(
+              (g) => g.id == examGroupId,
+              orElse: () => const ExamGroup(id: '', name: '미지정', colorHex: '#9E9E9E', orderIndex: 9999),
+            );
             examLogs.add(StudentExamLog(
               title: exam['title'] as String? ?? '',
               date: examDateTs != null ? DateFormat('yyyy-MM-dd').format(examDateTs.toDate()) : '',
               score: score,
+              examGroupId: examGroupId,
+              examGroupName: group.name,
+              examGroupColorHex: group.colorHex,
             ));
           }
         }

@@ -3,6 +3,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/theme/theme_provider.dart';
 import '../../auth/presentation/providers/auth_provider.dart';
 import 'providers/settings_providers.dart';
+import '../../test/presentation/providers/exam_providers.dart';
+import '../../test/domain/models/exam_group_models.dart';
 import '../domain/models/settings_models.dart';
 import '../../../core/widgets/math_card.dart';
 import '../../../core/widgets/math_loader.dart';
@@ -718,10 +720,115 @@ class _ScheduleCalendarTabState extends ConsumerState<_ScheduleCalendarTab> {
 class _AcademyStatsTab extends ConsumerWidget {
   const _AcademyStatsTab();
 
+  Color _parseColor(String hex) {
+    try {
+      final buffer = StringBuffer();
+      if (hex.length == 6 || hex.length == 7) buffer.write('ff');
+      buffer.write(hex.replaceFirst('#', ''));
+      return Color(int.parse(buffer.toString(), radix: 16));
+    } catch (_) {
+      return const Color(0xFF3F51B5);
+    }
+  }
+
+  Widget _buildStatsGroupFilter(BuildContext context, WidgetRef ref) {
+    final groupsAsync = ref.watch(examGroupsStreamProvider);
+    final selectedGroupId = ref.watch(settingsExamGroupFilterProvider);
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+
+    return groupsAsync.maybeWhen(
+      data: (groups) {
+        if (groups.isEmpty) return const SizedBox.shrink();
+
+        return Card(
+          elevation: 0,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+            side: BorderSide(
+              color: isDark ? Colors.grey.shade800 : Colors.grey.shade200,
+            ),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+            child: Row(
+              children: [
+                Icon(Icons.filter_list_rounded, color: theme.colorScheme.primary, size: 20),
+                const SizedBox(width: 12),
+                Text(
+                  '시험 분석 그룹:',
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: DropdownButtonHideUnderline(
+                    child: DropdownButton<String?>(
+                      value: selectedGroupId,
+                      isExpanded: true,
+                      dropdownColor: theme.colorScheme.surface,
+                      items: [
+                        const DropdownMenuItem<String?>(
+                          value: null,
+                          child: Text(
+                            '전체 시험 (합산)',
+                            style: TextStyle(fontWeight: FontWeight.w600),
+                          ),
+                        ),
+                        ...groups.map((g) {
+                          final color = _parseColor(g.colorHex);
+                          return DropdownMenuItem<String?>(
+                            value: g.id,
+                            child: Row(
+                              children: [
+                                Container(
+                                  width: 10,
+                                  height: 10,
+                                  decoration: BoxDecoration(
+                                    color: color,
+                                    shape: BoxShape.circle,
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                Text(
+                                  g.name,
+                                  style: const TextStyle(fontWeight: FontWeight.w500),
+                                ),
+                              ],
+                            ),
+                          );
+                        }),
+                      ],
+                      onChanged: (val) {
+                        ref.read(settingsExamGroupFilterProvider.notifier).state = val;
+                      },
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+      orElse: () => const SizedBox.shrink(),
+    );
+  }
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final statsAsync = ref.watch(academyStatsStreamProvider);
     final theme = Theme.of(context);
+    
+    final selectedGroupId = ref.watch(settingsExamGroupFilterProvider);
+    final allGroups = ref.watch(examGroupsStreamProvider).value ?? [];
+    final selectedGroup = allGroups.firstWhere(
+      (g) => g.id == selectedGroupId,
+      orElse: () => const ExamGroup(id: '', name: '', colorHex: '', orderIndex: 0),
+    );
+    final groupColor = selectedGroupId != null && selectedGroup.colorHex.isNotEmpty
+        ? _parseColor(selectedGroup.colorHex)
+        : theme.colorScheme.primary;
 
     return Scaffold(
       body: statsAsync.when(
@@ -731,12 +838,19 @@ class _AcademyStatsTab extends ConsumerWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                // Exam Group Selector
+                _buildStatsGroupFilter(context, ref),
+                const SizedBox(height: 16),
+
                 // 1. Grade stats table card
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 4.0),
                   child: Text(
                     '학년별 평균 분석',
-                    style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.bold,
+                      color: selectedGroupId != null ? groupColor : null,
+                    ),
                   ),
                 ),
                 const SizedBox(height: 12),
@@ -775,7 +889,10 @@ class _AcademyStatsTab extends ConsumerWidget {
                   padding: const EdgeInsets.symmetric(horizontal: 4.0),
                   child: Text(
                     '성적 명예의 전당 (평균 점수 기준)',
-                    style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.bold,
+                      color: selectedGroupId != null ? groupColor : null,
+                    ),
                   ),
                 ),
                 const SizedBox(height: 12),
@@ -797,7 +914,7 @@ class _AcademyStatsTab extends ConsumerWidget {
                           '${item.value.toStringAsFixed(1)}점',
                           style: theme.textTheme.bodyLarge?.copyWith(
                             fontWeight: FontWeight.bold,
-                            color: theme.colorScheme.primary,
+                            color: groupColor,
                           ),
                         ),
                       );
@@ -811,7 +928,10 @@ class _AcademyStatsTab extends ConsumerWidget {
                   padding: const EdgeInsets.symmetric(horizontal: 4.0),
                   child: Text(
                     '성장률 랭킹',
-                    style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.bold,
+                      color: selectedGroupId != null ? groupColor : null,
+                    ),
                   ),
                 ),
                 const SizedBox(height: 12),
@@ -944,6 +1064,16 @@ class _SystemSettingsTab extends ConsumerWidget {
                         );
                       },
                     ),
+                  ),
+                  const Divider(height: 1),
+                  ListTile(
+                    leading: const Icon(Icons.assessment_outlined),
+                    title: const Text('시험 통합 관리'),
+                    subtitle: const Text('모든 시험 기록을 검색, 필터링 및 일괄 이동/삭제합니다.'),
+                    trailing: const Icon(Icons.chevron_right),
+                    onTap: () {
+                      context.push('/settings/exam-management');
+                    },
                   ),
                   const Divider(height: 1),
                   ListTile(

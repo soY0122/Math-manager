@@ -12,6 +12,8 @@ import '../../features/attendance/presentation/attendance_screen.dart';
 import '../../features/test/presentation/test_screen.dart';
 import '../../features/test/presentation/test_add_screen.dart';
 import '../../features/test/presentation/test_score_input_screen.dart';
+import '../../features/test/presentation/exam_group_screen.dart';
+import '../../features/test/presentation/exam_management_screen.dart';
 import '../../features/homework/presentation/homework_screen.dart';
 import '../../features/settings/presentation/settings_screen.dart';
 import '../../features/settings/presentation/promotion_screen.dart';
@@ -75,9 +77,19 @@ final routerProvider = Provider<GoRouter>((ref) {
         builder: (context, state) => const TestAddScreen(),
       ),
       GoRoute(
+        path: '/grades/groups',
+        parentNavigatorKey: rootNavigatorKey,
+        builder: (context, state) => const ExamGroupScreen(),
+      ),
+      GoRoute(
         path: '/settings/promote',
         parentNavigatorKey: rootNavigatorKey,
         builder: (context, state) => const PromotionScreen(),
+      ),
+      GoRoute(
+        path: '/settings/exam-management',
+        parentNavigatorKey: rootNavigatorKey,
+        builder: (context, state) => const ExamManagementScreen(),
       ),
       GoRoute(
         path: '/grades/score-input/:id',

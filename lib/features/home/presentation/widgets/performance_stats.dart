@@ -6,12 +6,14 @@ class PerformanceStats extends StatelessWidget {
   final double monthlyAverageScore;
   final double monthlyAttendanceRate;
   final double monthlyHomeworkCompletionRate;
+  final Color? examGroupColor;
 
   const PerformanceStats({
     super.key,
     required this.monthlyAverageScore,
     required this.monthlyAttendanceRate,
     required this.monthlyHomeworkCompletionRate,
+    this.examGroupColor,
   });
 
   @override
@@ -40,7 +42,7 @@ class PerformanceStats extends StatelessWidget {
                 title: '평균 시험 점수',
                 value: '${monthlyAverageScore.toStringAsFixed(1)}점',
                 percentage: monthlyAverageScore / 100,
-                color: theme.colorScheme.primary,
+                color: examGroupColor ?? theme.colorScheme.primary,
                 onTap: () => context.go('/grades'),
               ),
               const Padding(

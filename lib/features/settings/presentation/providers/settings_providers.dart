@@ -23,8 +23,11 @@ final allSchedulesStreamProvider = StreamProvider<List<ScheduleItem>>((ref) {
   return repository.watchAllSchedules();
 });
 
+final settingsExamGroupFilterProvider = StateProvider<String?>((ref) => null);
+
 final academyStatsStreamProvider = StreamProvider<AcademyStats>((ref) {
   final repository = ref.watch(settingsRepositoryProvider);
   final grade = ref.watch(globalGradeFilterProvider);
-  return repository.watchAcademyStats(gradeFilter: grade);
+  final examGroupId = ref.watch(settingsExamGroupFilterProvider);
+  return repository.watchAcademyStats(gradeFilter: grade, examGroupId: examGroupId);
 });

@@ -3,10 +3,92 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
 import 'package:rxdart/rxdart.dart';
 import '../../domain/models/exam_models.dart';
+import '../../domain/models/exam_group_models.dart';
 import '../../domain/repositories/exam_repository.dart';
 
 class ExamRepositoryImpl implements ExamRepository {
   ExamRepositoryImpl();
+
+  @override
+  Stream<List<ExamGroup>> watchExamGroups() {
+    return FirebaseFirestore.instance
+        .collection('exam_groups')
+        .orderBy('orderIndex')
+        .snapshots()
+        .map((snap) => snap.docs
+            .map((doc) => ExamGroup.fromMap(doc.id, doc.data()))
+            .toList());
+  }
+
+  @override
+  Future<String> addExamGroup(String name, String colorHex) async {
+    final query = await FirebaseFirestore.instance.collection('exam_groups').get();
+    int maxIndex = -1;
+    for (final doc in query.docs) {
+      final index = doc.data()['orderIndex'] as int? ?? -1;
+      if (index > maxIndex) {
+        maxIndex = index;
+      }
+    }
+    final docRef = await FirebaseFirestore.instance.collection('exam_groups').add({
+      'name': name,
+      'colorHex': colorHex,
+      'orderIndex': maxIndex + 1,
+      'createdAt': FieldValue.serverTimestamp(),
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+    return docRef.id;
+  }
+
+  @override
+  Future<void> updateExamGroup(String id, String name, String colorHex) async {
+    await FirebaseFirestore.instance.collection('exam_groups').doc(id).update({
+      'name': name,
+      'colorHex': colorHex,
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+  }
+
+  @override
+  Future<void> reorderExamGroups(List<ExamGroup> orderedGroups) async {
+    final batch = FirebaseFirestore.instance.batch();
+    for (int i = 0; i < orderedGroups.length; i++) {
+      final group = orderedGroups[i];
+      final docRef = FirebaseFirestore.instance.collection('exam_groups').doc(group.id);
+      batch.update(docRef, {'orderIndex': i});
+    }
+    await batch.commit();
+  }
+
+  @override
+  Future<void> deleteExamGroup(
+    String id, {
+    required bool deleteExams,
+    String? moveGroupId,
+  }) async {
+    final examsQuery = await FirebaseFirestore.instance
+        .collection('exams')
+        .where('examGroupId', isEqualTo: id)
+        .get();
+
+    if (examsQuery.docs.isNotEmpty) {
+      if (deleteExams) {
+        for (final doc in examsQuery.docs) {
+          await deleteExam(doc.id);
+        }
+      } else if (moveGroupId != null) {
+        final batch = FirebaseFirestore.instance.batch();
+        for (final doc in examsQuery.docs) {
+          batch.update(doc.reference, {'examGroupId': moveGroupId});
+        }
+        await batch.commit();
+      } else {
+        throw Exception('그룹에 시험이 존재하여 삭제할 수 없습니다.');
+      }
+    }
+
+    await FirebaseFirestore.instance.collection('exam_groups').doc(id).delete();
+  }
 
 
 
@@ -19,18 +101,24 @@ class ExamRepositoryImpl implements ExamRepository {
   Stream<List<ExamOverview>> watchExams() {
     final examsStream = FirebaseFirestore.instance.collection('exams').snapshots();
     final examRecordsStream = FirebaseFirestore.instance.collection('exam_records').snapshots();
+    final examGroupsStream = FirebaseFirestore.instance.collection('exam_groups').snapshots();
 
-    return Rx.combineLatest2<
+    return Rx.combineLatest3<
+        QuerySnapshot<Map<String, dynamic>>,
         QuerySnapshot<Map<String, dynamic>>,
         QuerySnapshot<Map<String, dynamic>>,
         List<ExamOverview>>(
       examsStream,
       examRecordsStream,
-      (examsSnap, recordsSnap) {
+      examGroupsStream,
+      (examsSnap, recordsSnap, groupsSnap) {
         final List<ExamOverview> list = [];
 
         final allExams = examsSnap.docs;
         final allRecords = recordsSnap.docs.map((doc) => doc.data()).toList();
+        final allGroups = groupsSnap.docs
+            .map((doc) => ExamGroup.fromMap(doc.id, doc.data()))
+            .toList();
 
         for (final doc in allExams) {
           final e = doc.data();
@@ -39,6 +127,14 @@ class ExamRepositoryImpl implements ExamRepository {
           final dateTs = e['date'] as Timestamp?;
           final date = dateTs != null ? DateFormat('yyyy-MM-dd').format(dateTs.toDate()) : '';
           final grade = e['grade'] as int? ?? 1;
+          final examGroupId = e['examGroupId'] as String? ?? '';
+
+          final group = allGroups.firstWhere(
+            (g) => g.id == examGroupId,
+            orElse: () => const ExamGroup(id: '', name: '미지정', colorHex: '#9E9E9E', orderIndex: 9999),
+          );
+          final examGroupName = group.name;
+          final examGroupColorHex = group.colorHex;
 
           final examRecords = allRecords.where((r) => r['examId'] == id).toList();
 
@@ -63,6 +159,9 @@ class ExamRepositoryImpl implements ExamRepository {
             maxScore: maxScore,
             minScore: minScore,
             studentCount: examRecords.length,
+            examGroupId: examGroupId,
+            examGroupName: examGroupName,
+            examGroupColorHex: examGroupColorHex,
           ));
         }
 
@@ -144,12 +243,13 @@ class ExamRepositoryImpl implements ExamRepository {
   }
 
   @override
-  Future<String> addExam(String title, String date, int grade) async {
+  Future<String> addExam(String title, String date, int grade, String examGroupId) async {
     final targetTimestamp = _parseDate(date);
     final docRef = await FirebaseFirestore.instance.collection('exams').add({
       'title': title,
       'date': targetTimestamp,
       'grade': grade,
+      'examGroupId': examGroupId,
       'createdAt': FieldValue.serverTimestamp(),
       'updatedAt': FieldValue.serverTimestamp(),
     });
@@ -195,11 +295,12 @@ class ExamRepositoryImpl implements ExamRepository {
   }
 
   @override
-  Future<void> updateExam(String id, String title, String date) async {
+  Future<void> updateExam(String id, String title, String date, String examGroupId) async {
     final targetTimestamp = _parseDate(date);
     await FirebaseFirestore.instance.collection('exams').doc(id).update({
       'title': title,
       'date': targetTimestamp,
+      'examGroupId': examGroupId,
       'updatedAt': FieldValue.serverTimestamp(),
     });
   }
@@ -256,6 +357,7 @@ class ExamRepositoryImpl implements ExamRepository {
       'title': backup.exam['title'],
       'date': dateTs,
       'grade': backup.exam['grade'],
+      'examGroupId': backup.exam['examGroupId'] ?? '',
       'createdAt': backup.exam['createdAt'] ?? FieldValue.serverTimestamp(),
       'updatedAt': FieldValue.serverTimestamp(),
     });

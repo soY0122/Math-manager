@@ -47,11 +47,17 @@ class StudentExamLog {
   final String title;
   final String date; // YYYY-MM-DD
   final int score;
+  final String examGroupId;
+  final String examGroupName;
+  final String examGroupColorHex;
 
   const StudentExamLog({
     required this.title,
     required this.date,
     required this.score,
+    required this.examGroupId,
+    required this.examGroupName,
+    required this.examGroupColorHex,
   });
 }
 

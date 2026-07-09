@@ -7,6 +7,9 @@ class ExamOverview {
   final int maxScore;
   final int minScore;
   final int studentCount;
+  final String examGroupId;
+  final String examGroupName;
+  final String examGroupColorHex;
 
   const ExamOverview({
     required this.id,
@@ -17,6 +20,9 @@ class ExamOverview {
     required this.maxScore,
     required this.minScore,
     required this.studentCount,
+    required this.examGroupId,
+    required this.examGroupName,
+    required this.examGroupColorHex,
   });
 }
 

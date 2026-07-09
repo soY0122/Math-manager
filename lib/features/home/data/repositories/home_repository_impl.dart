@@ -12,7 +12,7 @@ class HomeRepositoryImpl implements HomeRepository {
 
 
   @override
-  Stream<DashboardStats> watchDashboardStats(int? gradeFilter) {
+  Stream<DashboardStats> watchDashboardStats(int? gradeFilter, String? examGroupId) {
     final studentsStream = FirebaseFirestore.instance.collection('students').snapshots();
     final attendancesStream = FirebaseFirestore.instance.collection('attendances').snapshots();
     final homeworksStream = FirebaseFirestore.instance.collection('homeworks').snapshots();
@@ -39,8 +39,17 @@ class HomeRepositoryImpl implements HomeRepository {
         final allStudents = studentsSnap.docs.map((doc) => doc.data()..['docId'] = doc.id).toList();
         final allAttendances = attendancesSnap.docs.map((doc) => doc.data()).toList();
         final allHomeworks = homeworksSnap.docs.map((doc) => doc.data()).toList();
-        final allRecords = examRecordsSnap.docs.map((doc) => doc.data()).toList();
-        final allExams = examsSnap.docs.map((doc) => doc.data()..['docId'] = doc.id).toList();
+        
+        final rawRecords = examRecordsSnap.docs.map((doc) => doc.data()).toList();
+        final rawExams = examsSnap.docs.map((doc) => doc.data()..['docId'] = doc.id).toList();
+
+        final allExams = (examGroupId != null && examGroupId.isNotEmpty)
+            ? rawExams.where((e) => e['examGroupId'] == examGroupId).toList()
+            : rawExams;
+        final allExamIds = allExams.map((e) => e['docId'] as String).toSet();
+        final allRecords = (examGroupId != null && examGroupId.isNotEmpty)
+            ? rawRecords.where((r) => allExamIds.contains(r['examId'] as String? ?? '')).toList()
+            : rawRecords;
 
         var activeStudents = allStudents.where((s) => s['isActive'] == true).toList();
         if (gradeFilter != null) {
@@ -135,6 +144,10 @@ class HomeRepositoryImpl implements HomeRepository {
           final studentScores = allRecords
               .where((r) => r['studentId'] == id)
               .toList();
+
+          if (examGroupId != null && examGroupId.isNotEmpty && studentScores.isEmpty) {
+            continue;
+          }
 
           final growthRes = StudentGrowthCalculator.calculate(
             studentRecords: studentScores,

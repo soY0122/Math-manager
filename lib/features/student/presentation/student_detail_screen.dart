@@ -4,6 +4,9 @@ import 'package:go_router/go_router.dart';
 import 'providers/student_detail_provider.dart';
 import 'providers/student_list_provider.dart';
 import '../domain/models/student_detail_data.dart';
+import '../../test/domain/models/exam_group_models.dart';
+import '../../test/presentation/providers/exam_providers.dart';
+import '../../../core/utils/student_evaluator.dart';
 import '../../../core/widgets/math_card.dart';
 import '../../../core/widgets/math_loader.dart';
 import '../../settings/presentation/providers/settings_providers.dart';
@@ -78,8 +81,8 @@ class StudentDetailScreen extends ConsumerWidget {
                     children: [
                       _buildAttendanceTab(context, ref, studentId, detail.attendanceLogs),
                       _buildHomeworkTab(context, ref, studentId, detail.homeworkLogs),
-                      _buildExamsTab(context, detail.examLogs),
-                      _buildAITab(context, detail),
+                      _buildExamsTab(context, ref, detail.examLogs),
+                      _buildAITab(context, ref, detail),
                       _buildConsultingTab(context, ref, studentId, detail.consultingLogs),
                     ],
                   ),
@@ -495,21 +498,113 @@ class StudentDetailScreen extends ConsumerWidget {
     );
   }
 
-  Widget _buildExamsTab(BuildContext context, List<StudentExamLog> logs) {
+  Color _parseColor(String hex) {
+    try {
+      final buffer = StringBuffer();
+      if (hex.length == 6 || hex.length == 7) buffer.write('ff');
+      buffer.write(hex.replaceFirst('#', ''));
+      return Color(int.parse(buffer.toString(), radix: 16));
+    } catch (_) {
+      return const Color(0xFF3F51B5);
+    }
+  }
+
+  Widget _buildDetailGroupFilterChip(BuildContext context, WidgetRef ref) {
+    final groupsAsync = ref.watch(examGroupsStreamProvider);
+    final selectedGroupId = ref.watch(studentDetailGroupFilterProvider(studentId));
+    final theme = Theme.of(context);
+
+    return groupsAsync.maybeWhen(
+      data: (groups) {
+        return SizedBox(
+          height: 40,
+          child: ListView(
+            scrollDirection: Axis.horizontal,
+            children: [
+              Padding(
+                padding: const EdgeInsets.only(right: 8.0),
+                child: ChoiceChip(
+                  label: const Text('전체'),
+                  selected: selectedGroupId == null,
+                  onSelected: (selected) {
+                    if (selected) {
+                      ref.read(studentDetailGroupFilterProvider(studentId).notifier).state = null;
+                    }
+                  },
+                  selectedColor: theme.colorScheme.primary,
+                  showCheckmark: false,
+                  labelStyle: TextStyle(
+                    color: selectedGroupId == null ? theme.colorScheme.onPrimary : theme.textTheme.bodyMedium?.color,
+                    fontWeight: selectedGroupId == null ? FontWeight.bold : FontWeight.normal,
+                    fontSize: 12,
+                  ),
+                ),
+              ),
+              ...groups.map((g) {
+                final isSelected = selectedGroupId == g.id;
+                final gColor = _parseColor(g.colorHex);
+                final chipTextColor = isSelected
+                    ? (gColor.computeLuminance() > 0.5 ? Colors.black87 : Colors.white)
+                    : theme.textTheme.bodyMedium?.color;
+
+                return Padding(
+                  padding: const EdgeInsets.only(right: 8.0),
+                  child: ChoiceChip(
+                    label: Text(g.name),
+                    selected: isSelected,
+                    onSelected: (selected) {
+                      if (selected) {
+                        ref.read(studentDetailGroupFilterProvider(studentId).notifier).state = g.id;
+                      }
+                    },
+                    selectedColor: gColor,
+                    showCheckmark: false,
+                    labelStyle: TextStyle(
+                      color: chipTextColor,
+                      fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                      fontSize: 12,
+                    ),
+                    avatar: isSelected
+                        ? null
+                        : Container(
+                            width: 8,
+                            height: 8,
+                            decoration: BoxDecoration(
+                              color: gColor,
+                              shape: BoxShape.circle,
+                            ),
+                          ),
+                  ),
+                );
+              }),
+            ],
+          ),
+        );
+      },
+      orElse: () => const SizedBox.shrink(),
+    );
+  }
+
+  Widget _buildExamsTab(BuildContext context, WidgetRef ref, List<StudentExamLog> logs) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
     
-    if (logs.isEmpty) {
-      return Center(
-        child: Text(
-          '기록된 시험 점수가 없습니다.',
-          style: theme.textTheme.bodyMedium,
-        ),
-      );
-    }
+    final selectedGroupId = ref.watch(studentDetailGroupFilterProvider(studentId));
+    final filteredLogs = selectedGroupId == null
+        ? logs
+        : logs.where((log) => log.examGroupId == selectedGroupId).toList();
+
+    final allGroups = ref.watch(examGroupsStreamProvider).value ?? [];
+    final selectedGroup = allGroups.firstWhere(
+      (g) => g.id == selectedGroupId,
+      orElse: () => const ExamGroup(id: '', name: '', colorHex: '', orderIndex: 0),
+    );
+    final chartColor = selectedGroupId != null && selectedGroup.colorHex.isNotEmpty
+        ? _parseColor(selectedGroup.colorHex)
+        : theme.colorScheme.primary;
 
     Widget graphWidget;
-    if (logs.length < 2) {
+    if (filteredLogs.length < 2) {
       graphWidget = Padding(
         padding: const EdgeInsets.symmetric(vertical: 24.0, horizontal: 16.0),
         child: Center(
@@ -519,7 +614,7 @@ class StudentDetailScreen extends ConsumerWidget {
               Icon(Icons.show_chart, color: Colors.grey.shade400, size: 40),
               const SizedBox(height: 8),
               Text(
-                'Not enough test data to display a score trend.',
+                '성적 추이 그래프를 보려면\n시험 데이터를 2회 이상 등록해주세요.',
                 textAlign: TextAlign.center,
                 style: theme.textTheme.bodyMedium?.copyWith(
                   color: Colors.grey.shade600,
@@ -532,16 +627,16 @@ class StudentDetailScreen extends ConsumerWidget {
       );
     } else {
       // Calculate Stats
-      final scores = logs.map((log) => log.score).toList();
+      final scores = filteredLogs.map((log) => log.score).toList();
       final highestScore = scores.reduce((a, b) => a > b ? a : b);
       final lowestScore = scores.reduce((a, b) => a < b ? a : b);
       final avgScore = scores.reduce((a, b) => a + b) / scores.length;
-      final latestScore = logs[0].score;
+      final latestScore = filteredLogs[0].score;
       
       String recentChangeText = '';
       Color recentChangeColor = theme.textTheme.bodyMedium?.color ?? Colors.black;
-      if (logs.length >= 2) {
-        final previousScore = logs[1].score;
+      if (filteredLogs.length >= 2) {
+        final previousScore = filteredLogs[1].score;
         final difference = latestScore - previousScore;
         if (difference > 0) {
           recentChangeText = '+$difference점 (직전 시험 대비)';
@@ -555,7 +650,7 @@ class StudentDetailScreen extends ConsumerWidget {
         }
       }
 
-      final chronologicalLogs = logs.reversed.toList();
+      final chronologicalLogs = filteredLogs.reversed.toList();
       final spots = chronologicalLogs.asMap().entries.map((entry) {
         return FlSpot(entry.key.toDouble(), entry.value.score.toDouble());
       }).toList();
@@ -563,21 +658,21 @@ class StudentDetailScreen extends ConsumerWidget {
       final barData = LineChartBarData(
         spots: spots,
         isCurved: false,
-        color: theme.colorScheme.primary,
+        color: chartColor,
         barWidth: 3,
         isStrokeCapRound: true,
         dotData: FlDotData(
           show: true,
           getDotPainter: (spot, percent, barData, index) => FlDotCirclePainter(
             radius: 4.5,
-            color: theme.colorScheme.primary,
+            color: chartColor,
             strokeWidth: 2,
             strokeColor: Colors.white,
           ),
         ),
         belowBarData: BarAreaData(
           show: true,
-          color: theme.colorScheme.primary.withOpacity(0.08),
+          color: chartColor.withOpacity(0.08),
         ),
       );
 
@@ -586,170 +681,172 @@ class StudentDetailScreen extends ConsumerWidget {
         child: MathCard(
           padding: const EdgeInsets.all(16),
           child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              '성적 추이 그래프',
-              style: theme.textTheme.titleMedium?.copyWith(
-                fontWeight: FontWeight.bold,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                '성적 추이 그래프',
+                style: theme.textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.bold,
+                ),
               ),
-            ),
-            const SizedBox(height: 24),
-            SizedBox(
-              height: 200,
-              child: LineChart(
-                LineChartData(
-                  gridData: FlGridData(
-                    show: true,
-                    drawVerticalLine: false,
-                    horizontalInterval: 20,
-                    getDrawingHorizontalLine: (value) => FlLine(
-                      color: isDark ? Colors.white10 : Colors.black12,
-                      strokeWidth: 0.8,
-                    ),
-                  ),
-                  titlesData: FlTitlesData(
-                    show: true,
-                    topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                    rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                    leftTitles: AxisTitles(
-                      sideTitles: SideTitles(
-                        showTitles: true,
-                        interval: 20,
-                        getTitlesWidget: (value, meta) => SideTitleWidget(
-                          axisSide: meta.axisSide,
-                          child: Text(
-                            '${value.toInt()}',
-                            style: theme.textTheme.bodySmall?.copyWith(fontSize: 10),
-                          ),
-                        ),
-                        reservedSize: 28,
+              const SizedBox(height: 24),
+              SizedBox(
+                height: 200,
+                child: LineChart(
+                  LineChartData(
+                    gridData: FlGridData(
+                      show: true,
+                      drawVerticalLine: false,
+                      horizontalInterval: 20,
+                      getDrawingHorizontalLine: (value) => FlLine(
+                        color: isDark ? Colors.white10 : Colors.black12,
+                        strokeWidth: 0.8,
                       ),
                     ),
-                    bottomTitles: AxisTitles(
-                      sideTitles: SideTitles(
-                        showTitles: true,
-                        getTitlesWidget: (value, meta) {
-                          final idx = value.toInt();
-                          if (idx >= 0 && idx < chronologicalLogs.length) {
-                            final title = chronologicalLogs[idx].title;
-                            final shortenedTitle = title.length > 5 ? '${title.substring(0, 4)}..' : title;
-                            return SideTitleWidget(
-                              axisSide: meta.axisSide,
-                              child: Text(
-                                shortenedTitle,
-                                style: theme.textTheme.bodySmall?.copyWith(fontSize: 9),
+                    titlesData: FlTitlesData(
+                      show: true,
+                      topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                      rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                      leftTitles: AxisTitles(
+                        sideTitles: SideTitles(
+                          showTitles: true,
+                          interval: 20,
+                          getTitlesWidget: (value, meta) => SideTitleWidget(
+                            axisSide: meta.axisSide,
+                            child: Text(
+                              '${value.toInt()}',
+                              style: theme.textTheme.bodySmall?.copyWith(fontSize: 10),
+                            ),
+                          ),
+                          reservedSize: 28,
+                        ),
+                      ),
+                      bottomTitles: AxisTitles(
+                        sideTitles: SideTitles(
+                          showTitles: true,
+                          getTitlesWidget: (value, meta) {
+                            final idx = value.toInt();
+                            if (idx >= 0 && idx < chronologicalLogs.length) {
+                              final title = chronologicalLogs[idx].title;
+                              final shortenedTitle = title.length > 5 ? '${title.substring(0, 4)}..' : title;
+                              return SideTitleWidget(
+                                axisSide: meta.axisSide,
+                                child: Text(
+                                  shortenedTitle,
+                                  style: theme.textTheme.bodySmall?.copyWith(fontSize: 9),
+                                ),
+                              );
+                            }
+                            return const SizedBox.shrink();
+                          },
+                          reservedSize: 22,
+                          interval: 1,
+                        ),
+                      ),
+                    ),
+                    borderData: FlBorderData(
+                      show: true,
+                      border: Border(
+                        bottom: BorderSide(color: isDark ? Colors.white10 : Colors.black12, width: 1),
+                        left: BorderSide(color: isDark ? Colors.white10 : Colors.black12, width: 1),
+                      ),
+                    ),
+                    minX: 0,
+                    maxX: (chronologicalLogs.length - 1).toDouble(),
+                    minY: 0,
+                    maxY: 100,
+                    lineBarsData: [barData],
+                    lineTouchData: LineTouchData(
+                      enabled: false,
+                      handleBuiltInTouches: false,
+                      touchTooltipData: LineTouchTooltipData(
+                        getTooltipColor: (spot) => Colors.transparent,
+                        tooltipRoundedRadius: 0,
+                        tooltipPadding: EdgeInsets.zero,
+                        tooltipMargin: 8,
+                        getTooltipItems: (List<LineBarSpot> touchedSpots) {
+                          return touchedSpots.map((spot) {
+                            return LineTooltipItem(
+                              '${spot.y.toInt()}점',
+                              TextStyle(
+                                color: chartColor,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 11,
                               ),
                             );
-                          }
-                          return const SizedBox.shrink();
+                          }).toList();
                         },
-                        reservedSize: 22,
-                        interval: 1,
                       ),
                     ),
-                  ),
-                  borderData: FlBorderData(
-                    show: true,
-                    border: Border(
-                      bottom: BorderSide(color: isDark ? Colors.white10 : Colors.black12, width: 1),
-                      left: BorderSide(color: isDark ? Colors.white10 : Colors.black12, width: 1),
-                    ),
-                  ),
-                  minX: 0,
-                  maxX: (chronologicalLogs.length - 1).toDouble(),
-                  minY: 0,
-                  maxY: 100,
-                  lineBarsData: [barData],
-                  lineTouchData: LineTouchData(
-                    enabled: false,
-                    handleBuiltInTouches: false,
-                    touchTooltipData: LineTouchTooltipData(
-                      getTooltipColor: (spot) => Colors.transparent,
-                      tooltipRoundedRadius: 0,
-                      tooltipPadding: EdgeInsets.zero,
-                      tooltipMargin: 8,
-                      getTooltipItems: (List<LineBarSpot> touchedSpots) {
-                        return touchedSpots.map((spot) {
-                          return LineTooltipItem(
-                            '${spot.y.toInt()}점',
-                            TextStyle(
-                              color: theme.colorScheme.primary,
+                    showingTooltipIndicators: spots.map((spot) {
+                      return ShowingTooltipIndicators([
+                        LineBarSpot(barData, 0, spot),
+                      ]);
+                    }).toList(),
+                    extraLinesData: ExtraLinesData(
+                      horizontalLines: [
+                        HorizontalLine(
+                          y: avgScore,
+                          color: chartColor.withOpacity(0.5),
+                          strokeWidth: 1.2,
+                          dashArray: [4, 4],
+                          label: HorizontalLineLabel(
+                            show: true,
+                            alignment: Alignment.topRight,
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: chartColor,
+                              fontSize: 10,
                               fontWeight: FontWeight.bold,
-                              fontSize: 11,
                             ),
-                          );
-                        }).toList();
-                      },
-                    ),
-                  ),
-                  showingTooltipIndicators: spots.map((spot) {
-                    return ShowingTooltipIndicators([
-                      LineBarSpot(barData, 0, spot),
-                    ]);
-                  }).toList(),
-                  extraLinesData: ExtraLinesData(
-                    horizontalLines: [
-                      HorizontalLine(
-                        y: avgScore,
-                        color: Colors.grey.withOpacity(0.5),
-                        strokeWidth: 1.2,
-                        dashArray: [4, 4],
-                        label: HorizontalLineLabel(
-                          show: true,
-                          alignment: Alignment.topRight,
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            color: Colors.grey.shade600,
-                            fontSize: 10,
-                            fontWeight: FontWeight.bold,
+                            labelResolver: (line) => '평균: ${avgScore.toStringAsFixed(1)}점',
                           ),
-                          labelResolver: (line) => '평균: ${avgScore.toStringAsFixed(1)}점',
                         ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-            const SizedBox(height: 24),
-            const Divider(),
-            const SizedBox(height: 12),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceAround,
-              children: [
-                _buildStatItem(context, '평균 점수', '${avgScore.toStringAsFixed(1)}점'),
-                _buildStatItem(context, '최고 점수', '${highestScore}점'),
-                _buildStatItem(context, '최저 점수', '${lowestScore}점'),
-              ],
-            ),
-            if (recentChangeText.isNotEmpty) ...[
-              const SizedBox(height: 16),
-              Center(
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                  decoration: BoxDecoration(
-                    color: recentChangeColor.withOpacity(0.08),
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: Text(
-                    recentChangeText,
-                    style: theme.textTheme.bodyMedium?.copyWith(
-                      color: recentChangeColor,
-                      fontWeight: FontWeight.bold,
+                      ],
                     ),
                   ),
                 ),
               ),
+              const SizedBox(height: 24),
+              const Divider(),
+              const SizedBox(height: 12),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceAround,
+                children: [
+                  _buildStatItem(context, '평균 점수', '${avgScore.toStringAsFixed(1)}점'),
+                  _buildStatItem(context, '최고 점수', '${highestScore}점'),
+                  _buildStatItem(context, '최저 점수', '${lowestScore}점'),
+                ],
+              ),
+              if (recentChangeText.isNotEmpty) ...[
+                const SizedBox(height: 16),
+                Center(
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: recentChangeColor.withOpacity(0.08),
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Text(
+                      recentChangeText,
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: recentChangeColor,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
             ],
-          ],
+          ),
         ),
-      ),
-    );
-  }
+      );
+    }
 
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
+        _buildDetailGroupFilterChip(context, ref),
+        const SizedBox(height: 16),
         graphWidget,
         Padding(
           padding: const EdgeInsets.only(left: 4.0, bottom: 8.0, top: 8.0),
@@ -760,25 +857,33 @@ class StudentDetailScreen extends ConsumerWidget {
             ),
           ),
         ),
-        ...logs.map((log) {
-          return Card(
-            margin: const EdgeInsets.only(bottom: 8),
-            child: ListTile(
-              title: Text(
-                log.title,
-                style: theme.textTheme.bodyLarge?.copyWith(fontWeight: FontWeight.bold),
-              ),
-              subtitle: Text('날짜: ${log.date}'),
-              trailing: Text(
-                '${log.score}점',
-                style: theme.textTheme.titleLarge?.copyWith(
-                  color: theme.colorScheme.primary,
-                  fontWeight: FontWeight.bold,
+        if (filteredLogs.isEmpty)
+          const Card(
+            child: Padding(
+              padding: EdgeInsets.all(24.0),
+              child: Center(child: Text('해당 그룹에 기록된 시험이 없습니다.')),
+            ),
+          )
+        else
+          ...filteredLogs.map((log) {
+            return Card(
+              margin: const EdgeInsets.only(bottom: 8),
+              child: ListTile(
+                title: Text(
+                  log.title,
+                  style: theme.textTheme.bodyLarge?.copyWith(fontWeight: FontWeight.bold),
+                ),
+                subtitle: Text('날짜: ${log.date}'),
+                trailing: Text(
+                  '${log.score}점',
+                  style: theme.textTheme.titleLarge?.copyWith(
+                    color: chartColor,
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
               ),
-            ),
-          );
-        }).toList(),
+            );
+          }).toList(),
       ],
     );
   }
@@ -804,100 +909,129 @@ class StudentDetailScreen extends ConsumerWidget {
     );
   }
 
-  Widget _buildAITab(BuildContext context, StudentDetailData detail) {
-    final ai = detail.aiEvaluation;
+  Widget _buildAITab(BuildContext context, WidgetRef ref, StudentDetailData detail) {
     final theme = Theme.of(context);
+    final selectedGroupId = ref.watch(studentDetailGroupFilterProvider(studentId));
+    
+    // Recalculate AI evaluation based on selected group exams
+    final filteredExamLogs = selectedGroupId == null
+        ? detail.examLogs
+        : detail.examLogs.where((log) => log.examGroupId == selectedGroupId).toList();
+    final filteredScoresList = filteredExamLogs.reversed.map((e) => e.score).toList();
+    
+    final ai = StudentEvaluator.evaluateWithRisk(
+      scores: filteredScoresList,
+      attendanceStatuses: detail.attendanceLogs.reversed.map((a) => a.status).toList(),
+      homeworkStatuses: detail.homeworkLogs.reversed.map((h) => h.status).toList(),
+      riskScore: detail.stats.riskScore,
+      triggers: [],
+    );
 
-    // Check if the overall data is sufficient. If not, show fallback warning.
-    if (!ai.isSufficient) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24.0),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(Icons.analytics_outlined, size: 48, color: Colors.grey.shade400),
-              const SizedBox(height: 12),
-              Text(
-                '분석할 데이터가 충분하지 않습니다.',
-                style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 8),
-              const Text(
-                '정확한 분석을 위해 시험 성적, 과제 완료 여부, 출결 기록을 먼저 입력해주세요.',
-                textAlign: TextAlign.center,
-                style: TextStyle(color: Colors.grey),
-              ),
-            ],
-          ),
-        ),
-      );
-    }
+    final allGroups = ref.watch(examGroupsStreamProvider).value ?? [];
+    final selectedGroup = allGroups.firstWhere(
+      (g) => g.id == selectedGroupId,
+      orElse: () => const ExamGroup(id: '', name: '', colorHex: '', orderIndex: 0),
+    );
+    final groupColor = selectedGroupId != null && selectedGroup.colorHex.isNotEmpty
+        ? _parseColor(selectedGroup.colorHex)
+        : theme.colorScheme.primary;
 
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Subtitle
-          Padding(
-            padding: const EdgeInsets.only(left: 4.0, bottom: 12.0),
-            child: Text(
-              '데이터 기반 맞춤 학습 분석 보고서',
-              style: theme.textTheme.bodyMedium?.copyWith(
-                color: theme.colorScheme.primary,
-                fontWeight: FontWeight.bold,
+          // Filter Chips
+          _buildDetailGroupFilterChip(context, ref),
+          const SizedBox(height: 16),
+
+          // Check sufficiency
+          if (!ai.isSufficient) ...[
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 48.0),
+              child: Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.analytics_outlined, size: 48, color: Colors.grey.shade400),
+                    const SizedBox(height: 12),
+                    Text(
+                      '분석할 데이터가 충분하지 않습니다.',
+                      style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+                    ),
+                    const SizedBox(height: 8),
+                    const Text(
+                      '정확한 분석을 위해 시험 성적, 과제 완료 여부, 출결 기록을 먼저 입력해주세요.',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(color: Colors.grey),
+                    ),
+                  ],
+                ),
               ),
             ),
-          ),
+          ] else ...[
+            // Subtitle
+            Padding(
+              padding: const EdgeInsets.only(left: 4.0, bottom: 12.0),
+              child: Text(
+                selectedGroupId != null 
+                    ? '"${selectedGroup.name}" 그룹 맞춤 학습 분석 보고서'
+                    : '데이터 기반 맞춤 종합 학습 분석 보고서',
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: groupColor,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
 
-          _buildLearningCard(
-            context,
-            title: '시험',
-            content: ai.examText,
-            icon: Icons.assessment_outlined,
-            color: theme.colorScheme.primary,
-          ),
-          const SizedBox(height: 12),
-          _buildLearningCard(
-            context,
-            title: '과제',
-            content: ai.homeworkText,
-            icon: Icons.assignment_outlined,
-            color: const Color(0xFFFF9800),
-          ),
-          const SizedBox(height: 12),
-          _buildLearningCard(
-            context,
-            title: '출결',
-            content: ai.attendanceText,
-            icon: Icons.calendar_today_outlined,
-            color: const Color(0xFF4CAF50),
-          ),
-          const SizedBox(height: 12),
-          _buildLearningCard(
-            context,
-            title: '성장률',
-            content: ai.growthText,
-            icon: Icons.trending_up_outlined,
-            color: const Color(0xFF9C27B0),
-          ),
-          const SizedBox(height: 12),
-          _buildLearningCard(
-            context,
-            title: '주의사항',
-            content: ai.warningText,
-            icon: Icons.warning_amber_rounded,
-            color: const Color(0xFFEF5350),
-          ),
-          const SizedBox(height: 12),
-          _buildLearningCard(
-            context,
-            title: '추천',
-            content: ai.recommendationText,
-            icon: Icons.lightbulb_outline,
-            color: const Color(0xFF2E7D32),
-          ),
+            _buildLearningCard(
+              context,
+              title: '시험',
+              content: ai.examText,
+              icon: Icons.assessment_outlined,
+              color: groupColor,
+            ),
+            const SizedBox(height: 12),
+            _buildLearningCard(
+              context,
+              title: '과제',
+              content: ai.homeworkText,
+              icon: Icons.assignment_outlined,
+              color: const Color(0xFFFF9800),
+            ),
+            const SizedBox(height: 12),
+            _buildLearningCard(
+              context,
+              title: '출결',
+              content: ai.attendanceText,
+              icon: Icons.calendar_today_outlined,
+              color: const Color(0xFF4CAF50),
+            ),
+            const SizedBox(height: 12),
+            _buildLearningCard(
+              context,
+              title: '성장률',
+              content: ai.growthText,
+              icon: Icons.trending_up_outlined,
+              color: selectedGroupId != null ? groupColor : const Color(0xFF9C27B0),
+            ),
+            const SizedBox(height: 12),
+            _buildLearningCard(
+              context,
+              title: '주의사항',
+              content: ai.warningText,
+              icon: Icons.warning_amber_rounded,
+              color: const Color(0xFFEF5350),
+            ),
+            const SizedBox(height: 12),
+            _buildLearningCard(
+              context,
+              title: '추천',
+              content: ai.recommendationText,
+              icon: Icons.lightbulb_outline,
+              color: const Color(0xFF2E7D32),
+            ),
+          ],
         ],
       ),
     );
