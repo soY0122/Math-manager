@@ -64,9 +64,13 @@ class _TestScoreInputScreenState extends ConsumerState<TestScoreInputScreen> {
     // Reset existing debounce timer
     _debounceTimers[studentId]?.cancel();
 
+    final exams = ref.read(examsListStreamProvider).value;
+    final exam = exams?.firstWhere((e) => e.id == widget.examId);
+    final maxPossibleScore = exam?.maxPossibleScore ?? 100;
+
     // Enforce validation bounds
     final scoreVal = int.tryParse(text.trim());
-    if (scoreVal == null || scoreVal < 0 || scoreVal > 100) {
+    if (scoreVal == null || scoreVal < 0 || scoreVal > maxPossibleScore) {
       return; // Do not auto-save invalid scores
     }
 
@@ -110,13 +114,17 @@ class _TestScoreInputScreenState extends ConsumerState<TestScoreInputScreen> {
   }
 
   Future<void> _saveAll(List<StudentExamScoreItem> items) async {
+    final exams = ref.read(examsListStreamProvider).value;
+    final exam = exams?.firstWhere((e) => e.id == widget.examId);
+    final maxPossibleScore = exam?.maxPossibleScore ?? 100;
+
     bool hasSaved = false;
     for (final item in items) {
       final text = _controllers[item.studentId]?.text.trim() ?? '';
       if (text.isEmpty) continue;
       
       final scoreVal = int.tryParse(text);
-      if (scoreVal != null && scoreVal >= 0 && scoreVal <= 100 && scoreVal != item.score) {
+      if (scoreVal != null && scoreVal >= 0 && scoreVal <= maxPossibleScore && scoreVal != item.score) {
         setState(() {
           _savingStates[item.studentId] = true;
         });
@@ -175,6 +183,10 @@ class _TestScoreInputScreenState extends ConsumerState<TestScoreInputScreen> {
           // Statistics Calculations
           final totalStudents = sortedScores.length;
           
+          final exams = ref.watch(examsListStreamProvider).value;
+          final exam = exams?.firstWhere((e) => e.id == widget.examId);
+          final maxPossibleScore = exam?.maxPossibleScore ?? 100;
+
           int completed = 0;
           final List<StudentExamScoreItem> missingStudents = [];
 
@@ -183,7 +195,7 @@ class _TestScoreInputScreenState extends ConsumerState<TestScoreInputScreen> {
             final text = controller.text.trim();
             if (text.isNotEmpty) {
               final parsed = int.tryParse(text);
-              if (parsed != null && parsed >= 0 && parsed <= 100) {
+              if (parsed != null && parsed >= 0 && parsed <= maxPossibleScore) {
                 completed++;
                 continue;
               }
@@ -312,10 +324,11 @@ class _TestScoreInputScreenState extends ConsumerState<TestScoreInputScreen> {
                           focusNode: node,
                           nextFocusNode: nextNode,
                           isSaving: isSaving,
+                          maxPossibleScore: maxPossibleScore,
                           onChanged: (text) => _onScoreChanged(item.studentId, text, item),
                           onSave: (text) {
                             final scoreVal = int.tryParse(text.trim());
-                            if (scoreVal != null && scoreVal >= 0 && scoreVal <= 100) {
+                            if (scoreVal != null && scoreVal >= 0 && scoreVal <= maxPossibleScore) {
                               _saveScoreDirect(item.studentId, scoreVal, item);
                             }
                           },
@@ -382,6 +395,7 @@ class _StudentScoreInputRow extends StatelessWidget {
   final FocusNode focusNode;
   final FocusNode? nextFocusNode;
   final bool isSaving;
+  final int maxPossibleScore;
   final ValueChanged<String> onChanged;
   final ValueChanged<String> onSave;
 
@@ -391,6 +405,7 @@ class _StudentScoreInputRow extends StatelessWidget {
     required this.focusNode,
     this.nextFocusNode,
     required this.isSaving,
+    required this.maxPossibleScore,
     required this.onChanged,
     required this.onSave,
   });
@@ -413,8 +428,8 @@ class _StudentScoreInputRow extends StatelessWidget {
       final parsed = int.tryParse(val);
       if (parsed == null) {
         errorText = '숫자만 입력';
-      } else if (parsed < 0 || parsed > 100) {
-        errorText = '0~100 사이';
+      } else if (parsed < 0 || parsed > maxPossibleScore) {
+        errorText = '0~$maxPossibleScore 사이';
       }
     }
 
@@ -494,21 +509,36 @@ class _StudentScoreInputRow extends StatelessWidget {
                       const SizedBox(width: 4),
                       Text('점수 미입력', style: TextStyle(color: Colors.amber.shade800, fontSize: 11, fontWeight: FontWeight.w600)),
                     ] else if (errorText != null) ...[
-                      const Icon(Icons.error_outline_rounded, size: 14, color: Color(0xFFEF5350)),
+                      const Icon(Icons.error_outline_rounded, size: 14, color: const Color(0xFFEF5350)),
                       const SizedBox(width: 4),
                       Text(errorText, style: const TextStyle(color: Color(0xFFEF5350), fontSize: 11, fontWeight: FontWeight.w600)),
-                    ] else if (isSaving) ...[
-                      const SizedBox(
-                        width: 12,
-                        height: 12,
-                        child: CircularProgressIndicator(strokeWidth: 2.0),
-                      ),
-                      const SizedBox(width: 6),
-                      const Text('저장 중...', style: TextStyle(color: Colors.blue, fontSize: 11, fontWeight: FontWeight.w600)),
-                    ] else if (isSaved) ...[
-                      const Icon(Icons.check_circle_outline_rounded, size: 14, color: Colors.green),
-                      const SizedBox(width: 4),
-                      const Text('저장됨', style: TextStyle(color: Colors.green, fontSize: 11, fontWeight: FontWeight.w500)),
+                    ] else ...[
+                      Builder(builder: (context) {
+                        final valStr = controller.text.trim();
+                        final parsed = int.tryParse(valStr);
+                        if (parsed != null && parsed >= 0 && parsed <= maxPossibleScore) {
+                          return Text(
+                            ExamScoreFormatter.formatScore(parsed, maxPossibleScore),
+                            style: TextStyle(
+                              color: isSaving ? Colors.grey : Colors.green.shade700,
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          );
+                        }
+                        return const SizedBox.shrink();
+                      }),
+                      if (isSaving) ...[
+                        const SizedBox(width: 6),
+                        const SizedBox(
+                          width: 12,
+                          height: 12,
+                          child: CircularProgressIndicator(strokeWidth: 2.0),
+                        ),
+                      ] else if (isSaved) ...[
+                        const SizedBox(width: 6),
+                        const Icon(Icons.check_circle_outline_rounded, size: 14, color: Colors.green),
+                      ],
                     ],
                   ],
                 ),

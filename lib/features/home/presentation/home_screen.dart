@@ -10,6 +10,7 @@ import 'widgets/ai_insights.dart';
 import 'widgets/leaderboard.dart';
 import 'widgets/recent_activity.dart';
 import '../../../core/widgets/math_loader.dart';
+import '../../../core/widgets/math_card.dart';
 
 class HomeScreen extends ConsumerWidget {
   const HomeScreen({super.key});
@@ -92,6 +93,86 @@ class HomeScreen extends ConsumerWidget {
                       examGroupColor: groupColor,
                     ),
                     const SizedBox(height: 24),
+
+                    // 4.1 Group-based Comparison Dashboard
+                    if (stats.highestClassAvg != null || stats.mostImprovedStudent != null) ...[
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 4.0),
+                        child: Text(
+                          '반별 성적 비교 분석',
+                          style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      MathCard(
+                        padding: const EdgeInsets.all(20),
+                        child: Column(
+                          children: [
+                            if (stats.highestClassAvg != null) ...[
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                children: [
+                                  const Text('최고 반 평균', style: TextStyle(fontWeight: FontWeight.w600)),
+                                  Text(
+                                    '${stats.highestClassAvg!.toStringAsFixed(1)}%',
+                                    style: TextStyle(fontWeight: FontWeight.bold, color: theme.colorScheme.primary),
+                                  ),
+                                ],
+                              ),
+                              const Divider(height: 16),
+                            ],
+                            if (stats.lowestClassAvg != null) ...[
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                children: [
+                                  const Text('최저 반 평균', style: TextStyle(fontWeight: FontWeight.w600)),
+                                  Text(
+                                    '${stats.lowestClassAvg!.toStringAsFixed(1)}%',
+                                    style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFFEF5350)),
+                                  ),
+                                ],
+                              ),
+                              const Divider(height: 16),
+                            ],
+                            if (stats.mostImprovedStudent != null) ...[
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                children: [
+                                  const Text('성적 최고 향상 학생', style: TextStyle(fontWeight: FontWeight.w600)),
+                                  Text(
+                                    '${stats.mostImprovedStudent} (+${stats.biggestImprovement?.toStringAsFixed(1) ?? '0.0'}%)',
+                                    style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF4CAF50)),
+                                  ),
+                                ],
+                              ),
+                              const Divider(height: 16),
+                            ],
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                const Text('평균 이상 학생 수', style: TextStyle(fontWeight: FontWeight.w600)),
+                                Text(
+                                  '${stats.studentsAboveClassAvg ?? 0}명',
+                                  style: TextStyle(fontWeight: FontWeight.bold, color: theme.colorScheme.primary),
+                                ),
+                              ],
+                            ),
+                            const Divider(height: 16),
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                const Text('평균 미만 학생 수', style: TextStyle(fontWeight: FontWeight.w600)),
+                                Text(
+                                  '${stats.studentsBelowClassAvg ?? 0}명',
+                                  style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFFF59E0B)),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 24),
+                    ],
 
                     // 5. Growth Leaderboard
                     GrowthLeaderboard(items: stats.growthLeaderboard),

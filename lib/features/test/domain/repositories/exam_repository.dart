@@ -14,14 +14,14 @@ abstract class ExamRepository {
 
   Stream<List<ExamOverview>> watchExams();
   Stream<List<StudentExamScoreItem>> watchExamScores(String examId);
-  Future<String> addExam(String title, String date, int grade, String examGroupId);
+  Future<String> addExam(String title, String date, int grade, String examGroupId, {int maxPossibleScore = 100});
   Future<void> updateExamScore({
     required String examId,
     required String studentId,
     required int score,
     String? recordId,
   });
-  Future<void> updateExam(String id, String title, String date, String examGroupId);
+  Future<void> updateExam(String id, String title, String date, String examGroupId, {int maxPossibleScore = 100});
   Future<void> deleteExam(String examId);
   Future<ExamBackup> deleteExamWithBackup(String examId);
   Future<void> restoreExamBackup(ExamBackup backup);

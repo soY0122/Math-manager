@@ -5,6 +5,7 @@ import 'providers/student_detail_provider.dart';
 import 'providers/student_list_provider.dart';
 import '../domain/models/student_detail_data.dart';
 import '../../test/domain/models/exam_group_models.dart';
+import '../../test/domain/models/exam_models.dart';
 import '../../test/presentation/providers/exam_providers.dart';
 import '../../../core/utils/student_evaluator.dart';
 import '../../../core/widgets/math_card.dart';
@@ -81,7 +82,7 @@ class StudentDetailScreen extends ConsumerWidget {
                     children: [
                       _buildAttendanceTab(context, ref, studentId, detail.attendanceLogs),
                       _buildHomeworkTab(context, ref, studentId, detail.homeworkLogs),
-                      _buildExamsTab(context, ref, detail.examLogs),
+                      _buildExamsTab(context, ref, detail),
                       _buildAITab(context, ref, detail),
                       _buildConsultingTab(context, ref, studentId, detail.consultingLogs),
                     ],
@@ -585,10 +586,11 @@ class StudentDetailScreen extends ConsumerWidget {
     );
   }
 
-  Widget _buildExamsTab(BuildContext context, WidgetRef ref, List<StudentExamLog> logs) {
+  Widget _buildExamsTab(BuildContext context, WidgetRef ref, StudentDetailData detail) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
     
+    final logs = detail.examLogs;
     final selectedGroupId = ref.watch(studentDetailGroupFilterProvider(studentId));
     final filteredLogs = selectedGroupId == null
         ? logs
@@ -626,33 +628,43 @@ class StudentDetailScreen extends ConsumerWidget {
         ),
       );
     } else {
-      // Calculate Stats
-      final scores = filteredLogs.map((log) => log.score).toList();
-      final highestScore = scores.reduce((a, b) => a > b ? a : b);
-      final lowestScore = scores.reduce((a, b) => a < b ? a : b);
-      final avgScore = scores.reduce((a, b) => a + b) / scores.length;
-      final latestScore = filteredLogs[0].score;
+      // Calculate Stats using score percentages
+      final percentages = filteredLogs.map((log) => (log.score / log.maxPossibleScore) * 100).toList();
+      final double avgScore = percentages.reduce((a, b) => a + b) / percentages.length;
+      
+      var highestLog = filteredLogs[0];
+      var lowestLog = filteredLogs[0];
+      for (final log in filteredLogs) {
+        final pct = (log.score / log.maxPossibleScore) * 100;
+        final hiPct = (highestLog.score / highestLog.maxPossibleScore) * 100;
+        final loPct = (lowestLog.score / lowestLog.maxPossibleScore) * 100;
+        if (pct > hiPct) highestLog = log;
+        if (pct < loPct) lowestLog = log;
+      }
       
       String recentChangeText = '';
       Color recentChangeColor = theme.textTheme.bodyMedium?.color ?? Colors.black;
       if (filteredLogs.length >= 2) {
-        final previousScore = filteredLogs[1].score;
-        final difference = latestScore - previousScore;
+        final latestPct = (filteredLogs[0].score / filteredLogs[0].maxPossibleScore) * 100;
+        final previousPct = (filteredLogs[1].score / filteredLogs[1].maxPossibleScore) * 100;
+        final difference = latestPct - previousPct;
+        final diffStr = difference % 1 == 0 ? difference.toStringAsFixed(0) : difference.toStringAsFixed(1);
         if (difference > 0) {
-          recentChangeText = '+$difference점 (직전 시험 대비)';
+          recentChangeText = '+$diffStr% (직전 시험 대비)';
           recentChangeColor = const Color(0xFF2E7D32); // Green
         } else if (difference < 0) {
-          recentChangeText = '$difference점 (직전 시험 대비)';
+          recentChangeText = '$diffStr% (직전 시험 대비)';
           recentChangeColor = const Color(0xFFC62828); // Red
         } else {
-          recentChangeText = '0점 변동 없음 (직전 시험 대비)';
+          recentChangeText = '0% 변동 없음 (직전 시험 대비)';
           recentChangeColor = Colors.grey.shade600;
         }
       }
 
       final chronologicalLogs = filteredLogs.reversed.toList();
       final spots = chronologicalLogs.asMap().entries.map((entry) {
-        return FlSpot(entry.key.toDouble(), entry.value.score.toDouble());
+        final pct = (entry.value.score / entry.value.maxPossibleScore) * 100;
+        return FlSpot(entry.key.toDouble(), pct);
       }).toList();
 
       final barData = LineChartBarData(
@@ -714,7 +726,7 @@ class StudentDetailScreen extends ConsumerWidget {
                           getTitlesWidget: (value, meta) => SideTitleWidget(
                             axisSide: meta.axisSide,
                             child: Text(
-                              '${value.toInt()}',
+                              '${value.toInt()}%',
                               style: theme.textTheme.bodySmall?.copyWith(fontSize: 10),
                             ),
                           ),
@@ -766,13 +778,21 @@ class StudentDetailScreen extends ConsumerWidget {
                         tooltipMargin: 8,
                         getTooltipItems: (List<LineBarSpot> touchedSpots) {
                           return touchedSpots.map((spot) {
+                            final idx = spot.x.toInt();
+                            if (idx >= 0 && idx < chronologicalLogs.length) {
+                              final log = chronologicalLogs[idx];
+                              return LineTooltipItem(
+                                ExamScoreFormatter.formatScore(log.score, log.maxPossibleScore),
+                                TextStyle(
+                                  color: chartColor,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 11,
+                                ),
+                              );
+                            }
                             return LineTooltipItem(
-                              '${spot.y.toInt()}점',
-                              TextStyle(
-                                color: chartColor,
-                                fontWeight: FontWeight.bold,
-                                fontSize: 11,
-                              ),
+                              '${spot.y.toInt()}%',
+                              TextStyle(color: chartColor),
                             );
                           }).toList();
                         },
@@ -798,7 +818,7 @@ class StudentDetailScreen extends ConsumerWidget {
                               fontSize: 10,
                               fontWeight: FontWeight.bold,
                             ),
-                            labelResolver: (line) => '평균: ${avgScore.toStringAsFixed(1)}점',
+                            labelResolver: (line) => '평균: ${ExamScoreFormatter.formatPercentage(avgScore)}',
                           ),
                         ),
                       ],
@@ -812,9 +832,25 @@ class StudentDetailScreen extends ConsumerWidget {
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceAround,
                 children: [
-                  _buildStatItem(context, '평균 점수', '${avgScore.toStringAsFixed(1)}점'),
-                  _buildStatItem(context, '최고 점수', '${highestScore}점'),
-                  _buildStatItem(context, '최저 점수', '${lowestScore}점'),
+                  _buildStatItem(context, '평균 점수', ExamScoreFormatter.formatPercentage(avgScore)),
+                  _buildStatItem(
+                    context,
+                    '최고 점수',
+                    ExamScoreFormatter.formatStats(
+                      (highestLog.score / highestLog.maxPossibleScore) * 100,
+                      highestLog.score.toDouble(),
+                      highestLog.maxPossibleScore,
+                    ),
+                  ),
+                  _buildStatItem(
+                    context,
+                    '최저 점수',
+                    ExamScoreFormatter.formatStats(
+                      (lowestLog.score / lowestLog.maxPossibleScore) * 100,
+                      lowestLog.score.toDouble(),
+                      lowestLog.maxPossibleScore,
+                    ),
+                  ),
                 ],
               ),
               if (recentChangeText.isNotEmpty) ...[
@@ -842,12 +878,109 @@ class StudentDetailScreen extends ConsumerWidget {
       );
     }
 
+    final comparison = selectedGroupId != null ? detail.groupComparisons[selectedGroupId] : null;
+
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
         _buildDetailGroupFilterChip(context, ref),
         const SizedBox(height: 16),
         graphWidget,
+        
+        // 4.2 Performance Comparison Card
+        if (comparison != null) ...[
+          Padding(
+            padding: const EdgeInsets.only(left: 4.0, bottom: 8.0),
+            child: Text(
+              '반내 성취도 비교 분석',
+              style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+            ),
+          ),
+          MathCard(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text('내 평균 성적', style: TextStyle(fontWeight: FontWeight.w600)),
+                    Text(
+                      ExamScoreFormatter.formatPercentage(comparison.studentAveragePct),
+                      style: TextStyle(fontWeight: FontWeight.bold, color: theme.colorScheme.primary),
+                    ),
+                  ],
+                ),
+                const Divider(height: 16),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text('반 평균 성적', style: TextStyle(fontWeight: FontWeight.w600)),
+                    Text(
+                      ExamScoreFormatter.formatPercentage(comparison.classAveragePct),
+                      style: const TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                  ],
+                ),
+                const Divider(height: 16),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text('반 평균과의 차이', style: TextStyle(fontWeight: FontWeight.w600)),
+                    Text(
+                      '${comparison.difference >= 0 ? '+' : ''}${comparison.difference.toStringAsFixed(1)}%',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        color: comparison.difference >= 0 ? const Color(0xFF2E7D32) : const Color(0xFFC62828),
+                      ),
+                    ),
+                  ],
+                ),
+                const Divider(height: 16),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text('반 석차', style: TextStyle(fontWeight: FontWeight.w600)),
+                    Text(
+                      '${comparison.rank}등 / ${comparison.totalParticipants}명',
+                      style: const TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                  ],
+                ),
+                const Divider(height: 16),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text('백분위', style: TextStyle(fontWeight: FontWeight.w600)),
+                    Text(
+                      '상위 ${comparison.percentile}%',
+                      style: TextStyle(fontWeight: FontWeight.bold, color: theme.colorScheme.primary),
+                    ),
+                  ],
+                ),
+                const Divider(height: 16),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text('성적 향상 추이', style: TextStyle(fontWeight: FontWeight.w600)),
+                    Text(
+                      comparison.trend == 'improving'
+                          ? '▲ 빠르게 향상 중'
+                          : (comparison.trend == 'falling' ? '▼ 하락 우려' : '유지 중'),
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        color: comparison.trend == 'improving'
+                            ? const Color(0xFF2E7D32)
+                            : (comparison.trend == 'falling' ? const Color(0xFFC62828) : Colors.grey.shade600),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 24),
+        ],
+
         Padding(
           padding: const EdgeInsets.only(left: 4.0, bottom: 8.0, top: 8.0),
           child: Text(
@@ -875,10 +1008,11 @@ class StudentDetailScreen extends ConsumerWidget {
                 ),
                 subtitle: Text('날짜: ${log.date}'),
                 trailing: Text(
-                  '${log.score}점',
+                  ExamScoreFormatter.formatScore(log.score, log.maxPossibleScore),
                   style: theme.textTheme.titleLarge?.copyWith(
                     color: chartColor,
                     fontWeight: FontWeight.bold,
+                    fontSize: 14,
                   ),
                 ),
               ),
@@ -917,14 +1051,16 @@ class StudentDetailScreen extends ConsumerWidget {
     final filteredExamLogs = selectedGroupId == null
         ? detail.examLogs
         : detail.examLogs.where((log) => log.examGroupId == selectedGroupId).toList();
-    final filteredScoresList = filteredExamLogs.reversed.map((e) => e.score).toList();
+    final filteredPercentagesList = filteredExamLogs.reversed.map((e) => (e.score / e.maxPossibleScore) * 100).toList();
+    final comparison = selectedGroupId != null ? detail.groupComparisons[selectedGroupId] : null;
     
     final ai = StudentEvaluator.evaluateWithRisk(
-      scores: filteredScoresList,
+      scorePercentages: filteredPercentagesList,
       attendanceStatuses: detail.attendanceLogs.reversed.map((a) => a.status).toList(),
       homeworkStatuses: detail.homeworkLogs.reversed.map((h) => h.status).toList(),
       riskScore: detail.stats.riskScore,
       triggers: [],
+      comparison: comparison,
     );
 
     final allGroups = ref.watch(examGroupsStreamProvider).value ?? [];

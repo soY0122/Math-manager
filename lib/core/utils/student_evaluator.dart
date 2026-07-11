@@ -1,4 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import '../../features/test/domain/models/exam_models.dart';
 
 class AIEvaluation {
   final String examText;
@@ -22,12 +23,12 @@ class AIEvaluation {
 
 class StudentEvaluator {
   static AIEvaluation evaluate({
-    required List<int> scores,
+    required List<double> scorePercentages,
     required List<String> attendanceStatuses,
     required List<String> homeworkStatuses,
+    StudentComparisonResult? comparison,
   }) {
-    // Determine overall sufficiency (requires at least some basic records to produce analysis)
-    final bool isSufficient = scores.length >= 2 || homeworkStatuses.isNotEmpty || attendanceStatuses.isNotEmpty;
+    final bool isSufficient = scorePercentages.length >= 2 || homeworkStatuses.isNotEmpty || attendanceStatuses.isNotEmpty;
 
     if (!isSufficient) {
       return const AIEvaluation(
@@ -43,27 +44,27 @@ class StudentEvaluator {
 
     // 1. Exams Section
     String examText = '분석할 데이터가 충분하지 않습니다.';
-    if (scores.length >= 2) {
-      final last4 = scores.length > 4 ? scores.sublist(scores.length - 4) : scores;
+    if (scorePercentages.isNotEmpty) {
+      final last4 = scorePercentages.length > 4 ? scorePercentages.sublist(scorePercentages.length - 4) : scorePercentages;
       final avgLast4 = last4.reduce((a, b) => a + b) / last4.length;
 
-      String comparison = '';
-      if (scores.length > 4) {
-        final prev = scores.sublist(0, scores.length - 4);
+      String comparisonStr = '';
+      if (scorePercentages.length > 4) {
+        final prev = scorePercentages.sublist(0, scorePercentages.length - 4);
         final avgPrev = prev.reduce((a, b) => a + b) / prev.length;
         final diff = (avgLast4 - avgPrev).round();
-        comparison = diff >= 0 
-            ? ' (이전 평균 대비 +${diff}점)' 
-            : ' (이전 평균 대비 ${diff}점)';
-      } else {
-        final latest = scores.last;
-        final prev = scores[scores.length - 2];
-        final diff = latest - prev;
-        comparison = diff >= 0 
-            ? ' (직전 시험 대비 +${diff}점)' 
-            : ' (직전 시험 대비 ${diff}점)';
+        comparisonStr = diff >= 0 
+            ? ' (이전 평균 대비 +${diff}%)' 
+            : ' (이전 평균 대비 ${diff}%)';
+      } else if (scorePercentages.length >= 2) {
+        final latest = scorePercentages.last;
+        final prev = scorePercentages[scorePercentages.length - 2];
+        final diff = (latest - prev).round();
+        comparisonStr = diff >= 0 
+            ? ' (직전 시험 대비 +${diff}%)' 
+            : ' (직전 시험 대비 ${diff}%)';
       }
-      examText = '최근 ${last4.length}회 평균 ${avgLast4.toStringAsFixed(0)}점$comparison';
+      examText = '최근 ${last4.length}회 평균 ${avgLast4.toStringAsFixed(1)}%$comparisonStr';
     }
 
     // 2. Homework Section
@@ -87,8 +88,8 @@ class StudentEvaluator {
 
     // 4. Growth Section
     String growthText = '분석할 데이터가 충분하지 않습니다.';
-    if (scores.length >= 2) {
-      final growthRate = StudentGrowthCalculator.calculateFromScores(scores);
+    if (scorePercentages.length >= 2) {
+      final growthRate = StudentGrowthCalculator.calculateFromScores(scorePercentages);
       final growthPct = growthRate.round();
       growthText = growthPct >= 0 ? '+$growthPct%' : '$growthPct%';
     }
@@ -96,10 +97,8 @@ class StudentEvaluator {
     // 5. Warnings Section
     String warningText = '특이사항 없음 (출결 및 과제 상태 양호)';
     
-    // Check for 3 consecutive homework misses
     bool consecutiveHwMiss = false;
     if (homeworkStatuses.length >= 3) {
-      // homeworkStatuses are in chronological order (latest is last)
       final len = homeworkStatuses.length;
       if (homeworkStatuses[len - 1] == 'INCOMPLETE' &&
           homeworkStatuses[len - 2] == 'INCOMPLETE' &&
@@ -108,7 +107,6 @@ class StudentEvaluator {
       }
     }
 
-    // Check for 3 consecutive absences
     bool consecutiveAbsent = false;
     if (attendanceStatuses.length >= 3) {
       final len = attendanceStatuses.length;
@@ -126,7 +124,6 @@ class StudentEvaluator {
     } else if (consecutiveAbsent) {
       warningText = '최근 3회 연속 결석';
     } else {
-      // Check for low averages
       if (homeworkStatuses.isNotEmpty) {
         final completed = homeworkStatuses.where((s) => s == 'COMPLETED').length;
         final partial = homeworkStatuses.where((s) => s == 'PARTIAL').length;
@@ -137,20 +134,38 @@ class StudentEvaluator {
       }
     }
 
+    if (comparison != null) {
+      if (comparison.difference < -5.0) {
+        warningText = '최근 성취도가 반 평균 대비 ${comparison.difference.abs().toStringAsFixed(1)}% 낮아 주의 깊은 모니터링이 필요합니다.';
+      }
+    }
+
     // 6. Recommendation Section
     String recommendationText = '현재 수준의 성실도를 유지하며 학원 학습 일정을 충실히 따르기를 권장합니다.';
-    if (scores.isNotEmpty) {
+    if (scorePercentages.isNotEmpty) {
       recommendationText = '현재 수준의 성실도 유지 및 심화 오답 클리닉 참가 권장';
     }
     if (warningText.contains('숙제 미완료')) {
       recommendationText = '과제 미완료 누적 해소를 위해 보강 클리닉 필수 참석 및 학습 일지 작성 권장';
     } else if (warningText.contains('결석')) {
       recommendationText = '결석으로 인한 학습 단절 해소를 위한 개념 보강 동영상 수강 권장';
-    } else if (scores.length >= 2) {
-      final latest = scores.last;
-      final prev = scores[scores.length - 2];
+    } else if (scorePercentages.length >= 2) {
+      final latest = scorePercentages.last;
+      final prev = scorePercentages[scorePercentages.length - 2];
       if (latest < prev) {
         recommendationText = '다음 시험 전 오답률 높은 단원의 기초 개념 다지기 및 유사 유형 오답 복습 권장';
+      }
+    }
+
+    if (comparison != null) {
+      final diffText = comparison.difference >= 0 ? '+' : '';
+      final comparisonInsight = '\n[반내 비교] 석차: ${comparison.rank}/${comparison.totalParticipants} (상위 ${comparison.percentile}%), 평균 대비 ${diffText}${comparison.difference.toStringAsFixed(1)}%';
+      recommendationText += comparisonInsight;
+      
+      if (comparison.trend == 'improving') {
+        recommendationText += '\n★ 다른 학생들보다 빠르게 성적이 향상되고 있으므로 칭찬과 격려를 부탁드립니다.';
+      } else if (comparison.trend == 'falling') {
+        recommendationText += '\n⚠️ 최근 성적이 반 평균 대비 하락하는 추세이므로 추가적인 개별 학습 지원이 필요할 수 있습니다.';
       }
     }
 
@@ -166,16 +181,18 @@ class StudentEvaluator {
   }
 
   static AIEvaluation evaluateWithRisk({
-    required List<int> scores,
+    required List<double> scorePercentages,
     required List<String> attendanceStatuses,
     required List<String> homeworkStatuses,
     required int riskScore,
     required List<String> triggers,
+    StudentComparisonResult? comparison,
   }) {
     final base = evaluate(
-      scores: scores,
+      scorePercentages: scorePercentages,
       attendanceStatuses: attendanceStatuses,
       homeworkStatuses: homeworkStatuses,
+      comparison: comparison,
     );
 
     if (!base.isSufficient) return base;
@@ -259,21 +276,26 @@ class StudentRiskCalculator {
         if (da == null || db == null) return 0;
         return da.compareTo(db);
       });
-    final scores = sortedExams.map((e) => e['score'] as int).toList();
+    
+    final percentages = sortedExams.map((e) {
+      final scoreVal = e['score'] as int;
+      final maxScore = e['maxPossibleScore'] as int? ?? 100;
+      return (scoreVal / maxScore) * 100;
+    }).toList();
 
-    if (scores.length >= 2) {
-      final latestScore = scores.last;
-      final prevScores = scores.sublist(0, scores.length - 1);
-      final prevAvg = prevScores.reduce((a, b) => a + b) / prevScores.length;
-      if (latestScore <= prevAvg - 20) {
+    if (percentages.length >= 2) {
+      final latestPct = percentages.last;
+      final prevPcts = percentages.sublist(0, percentages.length - 1);
+      final prevAvg = prevPcts.reduce((a, b) => a + b) / prevPcts.length;
+      if (latestPct <= prevAvg - 20) {
         score += 1;
-        triggers.add('최근 성적이 이전 평균 대비 20점 이상 하락 (이전 평균: ${prevAvg.toStringAsFixed(1)}점, 최근: $latestScore점) (+1)');
+        triggers.add('최근 성적이 이전 평균 대비 20% 이상 하락 (이전 평균: ${prevAvg.toStringAsFixed(1)}%, 최근: ${latestPct.toStringAsFixed(1)}%) (+1)');
       }
     }
 
-    if (scores.length >= 3) {
-      final len = scores.length;
-      if (scores[len - 1] < scores[len - 2] && scores[len - 2] < scores[len - 3]) {
+    if (percentages.length >= 3) {
+      final len = percentages.length;
+      if (percentages[len - 1] < percentages[len - 2] && percentages[len - 2] < percentages[len - 3]) {
         score += 1;
         triggers.add('최근 3회 시험 성적 연속 하락 (+1)');
       }
@@ -322,11 +344,21 @@ class StudentRiskCalculator {
       final date = e['date'] as DateTime?;
       return date != null && date.isBefore(last60DaysLimit);
     }).toList();
-    
+
     bool hasStagnation = false;
     if (recentExams.isNotEmpty && olderExams.isNotEmpty) {
-      final recentAvg = recentExams.map((e) => e['score'] as int).reduce((a, b) => a + b) / recentExams.length;
-      final olderAvg = olderExams.map((e) => e['score'] as int).reduce((a, b) => a + b) / olderExams.length;
+      final recentAvg = recentExams.map((e) {
+        final scoreVal = e['score'] as int;
+        final maxScore = e['maxPossibleScore'] as int? ?? 100;
+        return (scoreVal / maxScore) * 100;
+      }).reduce((a, b) => a + b) / recentExams.length;
+
+      final olderAvg = olderExams.map((e) {
+        final scoreVal = e['score'] as int;
+        final maxScore = e['maxPossibleScore'] as int? ?? 100;
+        return (scoreVal / maxScore) * 100;
+      }).reduce((a, b) => a + b) / olderExams.length;
+
       if (recentAvg <= olderAvg) {
         hasStagnation = true;
       }
@@ -378,20 +410,11 @@ class StudentRiskCalculator {
 }
 
 class StudentGrowthCalculator {
-  /// Calculates the growth rate from exam records of a student.
-  /// 
-  /// Receives:
-  /// - `studentRecords`: list of exam record documents for this student (each having 'examId' and 'score').
-  /// - `allExams`: list of all exam documents (each having 'docId' and 'date').
-  /// 
-  /// Returns a Map containing:
-  /// - `'rate'`: double (the calculated growth rate, or 0.0 if not enough data)
-  /// - `'trend'`: String ('상승 중', '하락 중', or '유지')
   static Map<String, dynamic> calculate({
     required List<Map<String, dynamic>> studentRecords,
     required List<Map<String, dynamic>> allExams,
   }) {
-    final List<Map<String, dynamic>> examDatesAndScores = [];
+    final List<Map<String, dynamic>> examDatesAndPercentages = [];
     for (final r in studentRecords) {
       final examId = r['examId'] as String?;
       final score = r['score'] as int? ?? 0;
@@ -401,41 +424,37 @@ class StudentGrowthCalculator {
       );
       final examDateTs = examDoc['date'] as Timestamp?;
       if (examDateTs == null) continue;
-      examDatesAndScores.add({
+      
+      final maxPossibleScore = examDoc['maxPossibleScore'] as int? ?? 100;
+      final percentage = (score / maxPossibleScore) * 100;
+      
+      examDatesAndPercentages.add({
         'date': examDateTs.toDate(),
-        'score': score,
+        'percentage': percentage,
       });
     }
 
-    // Sort chronologically ascending (oldest to newest)
-    examDatesAndScores.sort((a, b) => (a['date'] as DateTime).compareTo(b['date'] as DateTime));
-    final scores = examDatesAndScores.map((item) => item['score'] as int).toList();
+    examDatesAndPercentages.sort((a, b) => (a['date'] as DateTime).compareTo(b['date'] as DateTime));
+    final percentages = examDatesAndPercentages.map((item) => item['percentage'] as double).toList();
 
-    if (scores.length < 2) {
+    if (percentages.length < 2) {
       return {
         'rate': 0.0,
         'trend': '유지',
       };
     }
 
-    final int recent = scores.last;
-    final priorScores = scores.sublist(0, scores.length - 1);
-    if (priorScores.isEmpty) {
+    final double recent = percentages.last;
+    final priorPercentages = percentages.sublist(0, percentages.length - 1);
+    if (priorPercentages.isEmpty) {
       return {
         'rate': 0.0,
         'trend': '유지',
       };
     }
 
-    final double previousAverage = priorScores.reduce((a, b) => a + b) / priorScores.length;
-    if (previousAverage <= 0.0) {
-      return {
-        'rate': 0.0,
-        'trend': '유지',
-      };
-    }
-
-    final double rate = ((recent - previousAverage) / previousAverage) * 100;
+    final double previousAverage = priorPercentages.reduce((a, b) => a + b) / priorPercentages.length;
+    final double rate = recent - previousAverage;
     String trend = '유지';
     if (rate > 5.0) {
       trend = '상승 중';
@@ -449,20 +468,16 @@ class StudentGrowthCalculator {
     };
   }
 
-  /// Calculates the growth rate from a chronological list of scores directly.
-  static double calculateFromScores(List<int> chronologicalScores) {
-    if (chronologicalScores.length < 2) {
+  static double calculateFromScores(List<double> chronologicalPercentageScores) {
+    if (chronologicalPercentageScores.length < 2) {
       return 0.0;
     }
-    final int recent = chronologicalScores.last;
-    final priorScores = chronologicalScores.sublist(0, chronologicalScores.length - 1);
+    final double recent = chronologicalPercentageScores.last;
+    final priorScores = chronologicalPercentageScores.sublist(0, chronologicalPercentageScores.length - 1);
     if (priorScores.isEmpty) {
       return 0.0;
     }
     final double previousAverage = priorScores.reduce((a, b) => a + b) / priorScores.length;
-    if (previousAverage <= 0.0) {
-      return 0.0;
-    }
-    return ((recent - previousAverage) / previousAverage) * 100;
+    return recent - previousAverage;
   }
 }

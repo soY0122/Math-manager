@@ -1,5 +1,6 @@
 import 'student_stats.dart';
 import '../../../../core/utils/student_evaluator.dart';
+import '../../../test/domain/models/exam_models.dart';
 
 class StudentDetailData {
   final StudentStats stats;
@@ -8,6 +9,7 @@ class StudentDetailData {
   final List<StudentExamLog> examLogs;
   final AIEvaluation aiEvaluation;
   final List<StudentConsultingLog> consultingLogs;
+  final Map<String, StudentComparisonResult> groupComparisons;
 
   const StudentDetailData({
     required this.stats,
@@ -16,6 +18,7 @@ class StudentDetailData {
     required this.examLogs,
     required this.aiEvaluation,
     required this.consultingLogs,
+    required this.groupComparisons,
   });
 }
 
@@ -50,6 +53,7 @@ class StudentExamLog {
   final String examGroupId;
   final String examGroupName;
   final String examGroupColorHex;
+  final int maxPossibleScore;
 
   const StudentExamLog({
     required this.title,
@@ -58,6 +62,7 @@ class StudentExamLog {
     required this.examGroupId,
     required this.examGroupName,
     required this.examGroupColorHex,
+    this.maxPossibleScore = 100,
   });
 }
 

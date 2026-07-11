@@ -10,6 +10,12 @@ class DashboardStats {
   final String aiAnalysisSummary;
   final List<GrowthLeaderboardItem> growthLeaderboard;
   final List<RecentActivityItem> recentActivity;
+  final double? highestClassAvg;
+  final double? lowestClassAvg;
+  final String? mostImprovedStudent;
+  final double? biggestImprovement;
+  final int? studentsAboveClassAvg;
+  final int? studentsBelowClassAvg;
 
   const DashboardStats({
     required this.todayPresentCount,
@@ -23,6 +29,12 @@ class DashboardStats {
     required this.aiAnalysisSummary,
     required this.growthLeaderboard,
     required this.recentActivity,
+    this.highestClassAvg,
+    this.lowestClassAvg,
+    this.mostImprovedStudent,
+    this.biggestImprovement,
+    this.studentsAboveClassAvg,
+    this.studentsBelowClassAvg,
   });
 
   DashboardStats copyWith({
@@ -37,6 +49,12 @@ class DashboardStats {
     String? aiAnalysisSummary,
     List<GrowthLeaderboardItem>? growthLeaderboard,
     List<RecentActivityItem>? recentActivity,
+    double? highestClassAvg,
+    double? lowestClassAvg,
+    String? mostImprovedStudent,
+    double? biggestImprovement,
+    int? studentsAboveClassAvg,
+    int? studentsBelowClassAvg,
   }) {
     return DashboardStats(
       todayPresentCount: todayPresentCount ?? this.todayPresentCount,
@@ -50,6 +68,12 @@ class DashboardStats {
       aiAnalysisSummary: aiAnalysisSummary ?? this.aiAnalysisSummary,
       growthLeaderboard: growthLeaderboard ?? this.growthLeaderboard,
       recentActivity: recentActivity ?? this.recentActivity,
+      highestClassAvg: highestClassAvg ?? this.highestClassAvg,
+      lowestClassAvg: lowestClassAvg ?? this.lowestClassAvg,
+      mostImprovedStudent: mostImprovedStudent ?? this.mostImprovedStudent,
+      biggestImprovement: biggestImprovement ?? this.biggestImprovement,
+      studentsAboveClassAvg: studentsAboveClassAvg ?? this.studentsAboveClassAvg,
+      studentsBelowClassAvg: studentsBelowClassAvg ?? this.studentsBelowClassAvg,
     );
   }
 }

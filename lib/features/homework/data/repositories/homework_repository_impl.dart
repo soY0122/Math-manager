@@ -69,7 +69,7 @@ class HomeworkRepositoryImpl implements HomeworkRepository {
                 if (h['title'] == title) {
                   final otherStudentId = h['studentId'] as String;
                   final otherStudentDoc = allStudents.where((stDoc) => stDoc.id == otherStudentId).firstOrNull;
-                  if (otherStudentDoc != null && (otherStudentDoc.data() as Map<String, dynamic>)['grade'] == grade) {
+                  if (otherStudentDoc != null && otherStudentDoc.data()['grade'] == grade) {
                     return true;
                   }
                 }

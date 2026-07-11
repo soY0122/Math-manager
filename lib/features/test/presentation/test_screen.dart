@@ -251,8 +251,9 @@ class TestScreen extends ConsumerWidget {
                                     final idx = touchedSpot.x.toInt();
                                     if (idx >= 0 && idx < graphExams.length) {
                                       final exam = graphExams[idx];
+                                      final avgRaw = exam.averageScore * exam.maxPossibleScore / 100;
                                       return LineTooltipItem(
-                                        '시험명: ${exam.title}\n날짜: ${exam.date}\n평균: ${exam.averageScore.toStringAsFixed(1)}점\n인원: ${exam.studentCount}명',
+                                        '시험명: ${exam.title}\n날짜: ${exam.date}\n평균: ${ExamScoreFormatter.formatStats(exam.averageScore, avgRaw, exam.maxPossibleScore)}\n인원: ${exam.studentCount}명',
                                         TextStyle(
                                           color: theme.textTheme.bodyLarge?.color,
                                           fontWeight: FontWeight.bold,
@@ -304,7 +305,7 @@ class TestScreen extends ConsumerWidget {
                                   showTitles: true,
                                   getTitlesWidget: (value, meta) {
                                     return Text(
-                                      '${value.toInt()}점',
+                                      '${value.toInt()}%',
                                       style: theme.textTheme.bodySmall?.copyWith(fontSize: 10),
                                     );
                                   },
@@ -493,9 +494,24 @@ class TestScreen extends ConsumerWidget {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              _buildMiniIndicator(context, label: '평균 점수', value: '${exam.averageScore.toStringAsFixed(1)}점', color: theme.colorScheme.primary),
-              _buildMiniIndicator(context, label: '최고 점수', value: '${exam.maxScore}점', color: const Color(0xFF4CAF50)),
-              _buildMiniIndicator(context, label: '최저 점수', value: '${exam.minScore}점', color: const Color(0xFFEF5350)),
+              _buildMiniIndicator(
+                context,
+                label: '평균 점수',
+                value: ExamScoreFormatter.formatStats(exam.averageScore, exam.averageScore * exam.maxPossibleScore / 100, exam.maxPossibleScore),
+                color: theme.colorScheme.primary,
+              ),
+              _buildMiniIndicator(
+                context,
+                label: '최고 점수',
+                value: ExamScoreFormatter.formatStats(ExamScoreFormatter.calculatePercentage(exam.maxScore, exam.maxPossibleScore), exam.maxScore.toDouble(), exam.maxPossibleScore),
+                color: const Color(0xFF4CAF50),
+              ),
+              _buildMiniIndicator(
+                context,
+                label: '최저 점수',
+                value: ExamScoreFormatter.formatStats(ExamScoreFormatter.calculatePercentage(exam.minScore, exam.maxPossibleScore), exam.minScore.toDouble(), exam.maxPossibleScore),
+                color: const Color(0xFFEF5350),
+              ),
             ],
           ),
         ],
@@ -536,6 +552,7 @@ class TestScreen extends ConsumerWidget {
   void _showEditDialog(BuildContext context, WidgetRef ref, ExamOverview exam) {
     final titleController = TextEditingController(text: exam.title);
     final dateController = TextEditingController(text: exam.date);
+    final maxScoreController = TextEditingController(text: exam.maxPossibleScore.toString());
     final formKey = GlobalKey<FormState>();
     String? selectedGroupId = exam.examGroupId.isEmpty ? null : exam.examGroupId;
 
@@ -549,105 +566,123 @@ class TestScreen extends ConsumerWidget {
 
             return AlertDialog(
               title: const Text('시험 정보 수정'),
-              content: Form(
-                key: formKey,
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    TextFormField(
-                      controller: titleController,
-                      decoration: const InputDecoration(labelText: '시험명 *'),
-                      validator: (val) => (val == null || val.trim().isEmpty) ? '시험명을 입력하세요' : null,
-                    ),
-                    const SizedBox(height: 16),
-                    TextFormField(
-                      controller: dateController,
-                      decoration: const InputDecoration(
-                        labelText: '시험 날짜 *',
-                        hintText: 'YYYY-MM-DD',
+              content: SingleChildScrollView(
+                child: Form(
+                  key: formKey,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      TextFormField(
+                        controller: titleController,
+                        decoration: const InputDecoration(labelText: '시험명 *'),
+                        validator: (val) => (val == null || val.trim().isEmpty) ? '시험명을 입력하세요' : null,
                       ),
-                      validator: (val) => (val == null || val.trim().isEmpty) ? '날짜를 입력하세요' : null,
-                    ),
-                    const SizedBox(height: 16),
-                    // Group selection field
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.end,
-                      children: [
-                        Expanded(
-                          child: DropdownButtonFormField<String>(
-                            value: selectedGroupId,
-                            decoration: const InputDecoration(
-                              labelText: '시험 그룹 *',
-                              prefixIcon: Icon(Icons.folder_outlined),
-                            ),
-                            hint: const Text('시험 그룹을 선택하세요'),
-                            items: currentGroups.map((g) {
-                              final gColor = _parseColor(g.colorHex);
-                              return DropdownMenuItem<String>(
-                                value: g.id,
-                                child: Row(
-                                  children: [
-                                    Container(
-                                      width: 12,
-                                      height: 12,
-                                      decoration: BoxDecoration(
-                                        color: gColor,
-                                        shape: BoxShape.circle,
+                      const SizedBox(height: 16),
+                      TextFormField(
+                        controller: dateController,
+                        decoration: const InputDecoration(
+                          labelText: '시험 날짜 *',
+                          hintText: 'YYYY-MM-DD',
+                        ),
+                        validator: (val) => (val == null || val.trim().isEmpty) ? '날짜를 입력하세요' : null,
+                      ),
+                      const SizedBox(height: 16),
+                      TextFormField(
+                        controller: maxScoreController,
+                        decoration: const InputDecoration(labelText: '시험 만점 (최대 점수) *'),
+                        keyboardType: TextInputType.number,
+                        validator: (val) {
+                          if (val == null || val.trim().isEmpty) {
+                            return '시험 만점(최대 점수)을 입력하세요';
+                          }
+                          final score = int.tryParse(val.trim());
+                          if (score == null || score <= 0) {
+                            return '올바른 점수(0 초과 정수)를 입력하세요';
+                          }
+                          return null;
+                        },
+                      ),
+                      const SizedBox(height: 16),
+                      // Group selection field
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.end,
+                        children: [
+                          Expanded(
+                            child: DropdownButtonFormField<String>(
+                              value: selectedGroupId,
+                              decoration: const InputDecoration(
+                                labelText: '시험 그룹 *',
+                                prefixIcon: Icon(Icons.folder_outlined),
+                              ),
+                              hint: const Text('시험 그룹을 선택하세요'),
+                              items: currentGroups.map((g) {
+                                final gColor = _parseColor(g.colorHex);
+                                return DropdownMenuItem<String>(
+                                  value: g.id,
+                                  child: Row(
+                                    children: [
+                                      Container(
+                                        width: 12,
+                                        height: 12,
+                                        decoration: BoxDecoration(
+                                          color: gColor,
+                                          shape: BoxShape.circle,
+                                        ),
                                       ),
-                                    ),
-                                    const SizedBox(width: 10),
-                                    Text(
-                                      g.name,
-                                      style: const TextStyle(fontWeight: FontWeight.w500),
-                                    ),
-                                  ],
-                                ),
-                              );
-                            }).toList(),
-                            onChanged: (val) {
-                              if (val != null) {
-                                setState(() {
-                                  selectedGroupId = val;
-                                });
-                              }
-                            },
-                            validator: (val) => (val == null || val.isEmpty) ? '시험 그룹을 선택해야 합니다.' : null,
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        IconButton.filled(
-                          onPressed: () {
-                            showDialog(
-                              context: context,
-                              barrierDismissible: false,
-                              builder: (context) => InlineGroupFormDialog(ref: ref),
-                            ).then((newGroupId) {
-                              if (newGroupId != null && newGroupId is String) {
-                                ref.invalidate(examGroupsStreamProvider);
-                                Future.delayed(const Duration(milliseconds: 100), () {
-                                  if (context.mounted) {
-                                    setState(() {
-                                      selectedGroupId = newGroupId;
-                                    });
-                                  }
-                                });
-                              }
-                            });
-                          },
-                          icon: const Icon(Icons.add_rounded),
-                          tooltip: '새 시험 그룹 만들기',
-                          style: IconButton.styleFrom(
-                            backgroundColor: theme.colorScheme.primary,
-                            foregroundColor: Colors.white,
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(12),
+                                      const SizedBox(width: 10),
+                                      Text(
+                                        g.name,
+                                        style: const TextStyle(fontWeight: FontWeight.w500),
+                                      ),
+                                    ],
+                                  ),
+                                );
+                              }).toList(),
+                              onChanged: (val) {
+                                if (val != null) {
+                                  setState(() {
+                                    selectedGroupId = val;
+                                  });
+                                }
+                              },
+                              validator: (val) => (val == null || val.isEmpty) ? '시험 그룹을 선택해야 합니다.' : null,
                             ),
-                            minimumSize: const Size(48, 48),
                           ),
-                        ),
-                      ],
-                    ),
-                  ],
+                          const SizedBox(width: 12),
+                          IconButton.filled(
+                            onPressed: () {
+                              showDialog(
+                                context: context,
+                                barrierDismissible: false,
+                                builder: (context) => InlineGroupFormDialog(ref: ref),
+                              ).then((newGroupId) {
+                                if (newGroupId != null && newGroupId is String) {
+                                  ref.invalidate(examGroupsStreamProvider);
+                                  Future.delayed(const Duration(milliseconds: 100), () {
+                                    if (context.mounted) {
+                                      setState(() {
+                                        selectedGroupId = newGroupId;
+                                      });
+                                    }
+                                  });
+                                }
+                              });
+                            },
+                            icon: const Icon(Icons.add_rounded),
+                            tooltip: '새 시험 그룹 만들기',
+                            style: IconButton.styleFrom(
+                              backgroundColor: theme.colorScheme.primary,
+                              foregroundColor: Colors.white,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              minimumSize: const Size(48, 48),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
                 ),
               ),
               actions: [
@@ -663,6 +698,7 @@ class TestScreen extends ConsumerWidget {
                             titleController.text.trim(),
                             dateController.text.trim(),
                             selectedGroupId!,
+                            maxPossibleScore: int.tryParse(maxScoreController.text.trim()) ?? 100,
                           );
                       ref.invalidate(examsListStreamProvider);
                       if (context.mounted) {

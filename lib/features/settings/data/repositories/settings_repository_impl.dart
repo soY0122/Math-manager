@@ -148,8 +148,18 @@ class SettingsRepositoryImpl implements SettingsRepository {
           final gradeStudentIds = gradeStudents.map((s) => s['docId'] as String).toSet();
 
           final gradeRecords = allRecords.where((r) => gradeStudentIds.contains(r['studentId'])).toList();
+          
+          final Map<String, int> examMaxScores = {
+            for (final e in rawExams) e['docId'] as String: e['maxPossibleScore'] as int? ?? 100
+          };
+
           final double avgScore = gradeRecords.isNotEmpty
-              ? gradeRecords.map((r) => r['score'] as int).reduce((a, b) => a + b) / gradeRecords.length
+              ? gradeRecords.map((r) {
+                  final examId = r['examId'] as String?;
+                  final limit = examMaxScores[examId] ?? 100;
+                  final score = r['score'] as int? ?? 0;
+                  return (score / limit) * 100;
+                }).reduce((a, b) => a + b) / gradeRecords.length
               : 0.0;
 
           final gradeAttsAll = allAttendances.where((a) => gradeStudentIds.contains(a['studentId'])).toList();
@@ -196,6 +206,11 @@ class SettingsRepositoryImpl implements SettingsRepository {
           targetStudents = targetStudents.where((s) => s['grade'] == gradeFilter).toList();
         }
 
+        // Recompute examMaxScores based on allExams (since rawExams contains all)
+        final Map<String, int> examMaxScores = {
+          for (final e in allExams) e['docId'] as String: e['maxPossibleScore'] as int? ?? 100
+        };
+
         for (final s in targetStudents) {
           final studentId = s['docId'] as String;
           final name = s['name'] as String? ?? '';
@@ -216,9 +231,15 @@ class SettingsRepositoryImpl implements SettingsRepository {
           );
           final double growthRate = growthRes['rate'] as double;
 
-          final scoresList = studentScores.map((r) => r['score'] as int).toList();
-          final double avgScore = scoresList.isNotEmpty
-              ? scoresList.reduce((a, b) => a + b) / scoresList.length
+          final percentagesList = studentScores.map((r) {
+            final examId = r['examId'] as String?;
+            final limit = examMaxScores[examId] ?? 100;
+            final score = r['score'] as int? ?? 0;
+            return (score / limit) * 100;
+          }).toList();
+          
+          final double avgScore = percentagesList.isNotEmpty
+              ? percentagesList.reduce((a, b) => a + b) / percentagesList.length
               : 0.0;
 
           scoreRankings.add(RankingItem(

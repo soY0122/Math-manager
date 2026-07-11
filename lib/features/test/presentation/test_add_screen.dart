@@ -17,6 +17,7 @@ class _TestAddScreenState extends ConsumerState<TestAddScreen> {
   final _formKey = GlobalKey<FormState>();
   final _titleController = TextEditingController();
   final _dateController = TextEditingController();
+  final _maxScoreController = TextEditingController(text: '100');
   int _selectedGrade = 3; // Default: 초3
   String? _selectedGroupId;
   bool _isSaving = false;
@@ -31,6 +32,7 @@ class _TestAddScreenState extends ConsumerState<TestAddScreen> {
   void dispose() {
     _titleController.dispose();
     _dateController.dispose();
+    _maxScoreController.dispose();
     super.dispose();
   }
 
@@ -168,7 +170,7 @@ class _TestAddScreenState extends ConsumerState<TestAddScreen> {
                         }
                       },
                     ),
-                    const SizedBox(height: 20),
+                     const SizedBox(height: 20),
 
                     InkWell(
                       onTap: () => _selectDate(context),
@@ -179,6 +181,24 @@ class _TestAddScreenState extends ConsumerState<TestAddScreen> {
                           suffixIcon: const Icon(Icons.calendar_today),
                         ),
                       ),
+                    ),
+                    const SizedBox(height: 20),
+
+                    MathTextField(
+                      controller: _maxScoreController,
+                      labelText: '시험 만점 (최대 점수) *',
+                      hintText: '기본: 100',
+                      keyboardType: TextInputType.number,
+                      validator: (val) {
+                        if (val == null || val.trim().isEmpty) {
+                          return '시험 만점(최대 점수)을 입력해주세요.';
+                        }
+                        final score = int.tryParse(val.trim());
+                        if (score == null || score <= 0) {
+                          return '올바른 점수(0 초과 정수)를 입력해주세요.';
+                        }
+                        return null;
+                      },
                     ),
                     const SizedBox(height: 36),
                     MathButton(
@@ -251,9 +271,16 @@ class _TestAddScreenState extends ConsumerState<TestAddScreen> {
     final title = _titleController.text.trim();
     final date = _dateController.text;
     final groupId = _selectedGroupId ?? '';
+    final maxScore = int.tryParse(_maxScoreController.text.trim()) ?? 100;
 
     try {
-      await ref.read(examRepositoryProvider).addExam(title, date, _selectedGrade, groupId);
+      await ref.read(examRepositoryProvider).addExam(
+        title,
+        date,
+        _selectedGrade,
+        groupId,
+        maxPossibleScore: maxScore,
+      );
       ref.invalidate(examsListStreamProvider);
       if (mounted) {
         context.pop();

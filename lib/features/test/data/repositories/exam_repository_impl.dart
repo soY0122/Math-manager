@@ -135,33 +135,27 @@ class ExamRepositoryImpl implements ExamRepository {
           );
           final examGroupName = group.name;
           final examGroupColorHex = group.colorHex;
+          final maxPossibleScore = e['maxPossibleScore'] as int? ?? 100;
 
-          final examRecords = allRecords.where((r) => r['examId'] == id).toList();
-
-          final double averageScore = examRecords.isNotEmpty
-              ? examRecords.map((r) => r['score'] as int).reduce((a, b) => a + b) / examRecords.length
-              : 0.0;
-
-          int maxScore = 0;
-          int minScore = 0;
-          if (examRecords.isNotEmpty) {
-            final scores = examRecords.map((r) => r['score'] as int).toList();
-            maxScore = scores.reduce((a, b) => a > b ? a : b);
-            minScore = scores.reduce((a, b) => a < b ? a : b);
-          }
+          final stats = ExamParticipantCalculator.calculateStats(
+            examId: id,
+            rawRecords: allRecords,
+            maxPossibleScore: maxPossibleScore,
+          );
 
           list.add(ExamOverview(
             id: id,
             title: title,
             date: date,
             grade: grade,
-            averageScore: averageScore,
-            maxScore: maxScore,
-            minScore: minScore,
-            studentCount: examRecords.length,
+            averageScore: stats['average'] as double,
+            maxScore: stats['max'] as int,
+            minScore: stats['min'] as int,
+            studentCount: stats['count'] as int,
             examGroupId: examGroupId,
             examGroupName: examGroupName,
             examGroupColorHex: examGroupColorHex,
+            maxPossibleScore: maxPossibleScore,
           ));
         }
 
@@ -243,13 +237,14 @@ class ExamRepositoryImpl implements ExamRepository {
   }
 
   @override
-  Future<String> addExam(String title, String date, int grade, String examGroupId) async {
+  Future<String> addExam(String title, String date, int grade, String examGroupId, {int maxPossibleScore = 100}) async {
     final targetTimestamp = _parseDate(date);
     final docRef = await FirebaseFirestore.instance.collection('exams').add({
       'title': title,
       'date': targetTimestamp,
       'grade': grade,
       'examGroupId': examGroupId,
+      'maxPossibleScore': maxPossibleScore,
       'createdAt': FieldValue.serverTimestamp(),
       'updatedAt': FieldValue.serverTimestamp(),
     });
@@ -295,12 +290,13 @@ class ExamRepositoryImpl implements ExamRepository {
   }
 
   @override
-  Future<void> updateExam(String id, String title, String date, String examGroupId) async {
+  Future<void> updateExam(String id, String title, String date, String examGroupId, {int maxPossibleScore = 100}) async {
     final targetTimestamp = _parseDate(date);
     await FirebaseFirestore.instance.collection('exams').doc(id).update({
       'title': title,
       'date': targetTimestamp,
       'examGroupId': examGroupId,
+      'maxPossibleScore': maxPossibleScore,
       'updatedAt': FieldValue.serverTimestamp(),
     });
   }

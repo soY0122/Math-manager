@@ -5,8 +5,9 @@ import 'package:rxdart/rxdart.dart';
 import '../../domain/models/student_stats.dart';
 import '../../domain/models/student_detail_data.dart';
 import '../../domain/repositories/student_repository.dart';
-import '../../../../core/utils/student_evaluator.dart';
 import '../../../test/domain/models/exam_group_models.dart';
+import '../../../test/domain/models/exam_models.dart';
+import '../../../../core/utils/student_evaluator.dart';
 
 class StudentRepositoryImpl implements StudentRepository {
   StudentRepositoryImpl();
@@ -35,7 +36,14 @@ class StudentRepositoryImpl implements StudentRepository {
         final List<StudentStats> list = [];
 
         final allStudents = studentsSnap.docs;
-        final allRecords = recordsSnap.docs.map((doc) => doc.data()).toList();
+        final Map<String, int> examMaxScores = {};
+        for (final doc in examsSnap.docs) {
+          final data = doc.data();
+          final maxScore = data['maxPossibleScore'] as int? ?? 100;
+          examMaxScores[doc.id] = maxScore;
+        }
+        final rawRecords = recordsSnap.docs.map((doc) => doc.data()).toList();
+        final allRecords = ExamParticipantCalculator.cleanRawRecords(rawRecords, examMaxScores: examMaxScores);
         final allAttendances = attendancesSnap.docs.map((doc) => doc.data()).toList();
         final allHomeworks = homeworksSnap.docs.map((doc) => doc.data()).toList();
         final allExams = examsSnap.docs.map((doc) => doc.data()..['docId'] = doc.id).toList();
@@ -79,9 +87,16 @@ class StudentRepositoryImpl implements StudentRepository {
               .where((r) => r['studentId'] == id)
               .toList();
           studentScores.sort((a, b) => (a['examId'] as String).compareTo(b['examId'] as String));
-          final scoresList = studentScores.map((r) => r['score'] as int).toList();
-          final double avgScore = scoresList.isNotEmpty
-              ? scoresList.reduce((a, b) => a + b) / scoresList.length
+          
+          final percentagesList = studentScores.map((r) {
+            final examId = r['examId'] as String;
+            final exam = allExams.firstWhere((e) => e['docId'] == examId, orElse: () => <String, dynamic>{});
+            final maxScore = exam['maxPossibleScore'] as int? ?? 100;
+            return (r['score'] as int) / maxScore * 100;
+          }).toList();
+          
+          final double avgScore = percentagesList.isNotEmpty
+              ? percentagesList.reduce((a, b) => a + b) / percentagesList.length
               : 0.0;
 
           // 2. Attendance rate
@@ -163,6 +178,7 @@ class StudentRepositoryImpl implements StudentRepository {
             examLogsForRisk.add({
               'date': examDateTs.toDate(),
               'score': score,
+              'maxPossibleScore': examDoc['maxPossibleScore'] as int? ?? 100,
             });
           }
 
@@ -268,7 +284,14 @@ class StudentRepositoryImpl implements StudentRepository {
         final isActive = sVal['isActive'] as bool? ?? true;
 
         final allExams = examsSnap.docs.map((doc) => doc.data()..['docId'] = doc.id).toList();
-        final allRecords = recordsSnap.docs.map((doc) => doc.data()).toList();
+        final Map<String, int> examMaxScores = {};
+        for (final doc in examsSnap.docs) {
+          final data = doc.data();
+          final maxScore = data['maxPossibleScore'] as int? ?? 100;
+          examMaxScores[doc.id] = maxScore;
+        }
+        final rawRecords = recordsSnap.docs.map((doc) => doc.data()).toList();
+        final allRecords = ExamParticipantCalculator.cleanRawRecords(rawRecords, examMaxScores: examMaxScores);
         final allGroups = groupsSnap.docs
             .map((doc) => ExamGroup.fromMap(doc.id, doc.data()))
             .toList();
@@ -309,6 +332,7 @@ class StudentRepositoryImpl implements StudentRepository {
               examGroupId: examGroupId,
               examGroupName: group.name,
               examGroupColorHex: group.colorHex,
+              maxPossibleScore: exam['maxPossibleScore'] as int? ?? 100,
             ));
           }
         }
@@ -403,6 +427,7 @@ class StudentRepositoryImpl implements StudentRepository {
           examLogsForRisk.add({
             'date': examDateTs.toDate(),
             'score': score,
+            'maxPossibleScore': examDoc['maxPossibleScore'] as int? ?? 100,
           });
         }
 
@@ -414,10 +439,23 @@ class StudentRepositoryImpl implements StudentRepository {
           homeworkLogs: hwLogsForRisk,
           examLogs: examLogsForRisk,
         );
+        final Map<String, StudentComparisonResult> groupComparisons = {};
+        final uniqueGroupIds = examLogs.map((e) => e.examGroupId).where((id) => id.isNotEmpty).toSet();
+        for (final gId in uniqueGroupIds) {
+          final comp = ExamGroupComparisonCalculator.calculate(
+            studentId: studentId,
+            examGroupId: gId,
+            rawRecords: rawRecords,
+            allExams: allExams,
+          );
+          if (comp != null) {
+            groupComparisons[gId] = comp;
+          }
+        }
 
-        final scoresList = examLogs.reversed.map((e) => e.score).toList();
+        final percentagesList = examLogs.reversed.map((e) => (e.score / e.maxPossibleScore) * 100).toList();
         final ai = StudentEvaluator.evaluateWithRisk(
-          scores: scoresList,
+          scorePercentages: percentagesList,
           attendanceStatuses: attendanceLogs.reversed.map((a) => a.status).toList(),
           homeworkStatuses: homeworkLogs.reversed.map((h) => h.status).toList(),
           riskScore: riskRes.score,
@@ -448,6 +486,19 @@ class StudentRepositoryImpl implements StudentRepository {
             ? (completedCount + (partialCount * 0.5)) / studentHws.length
             : 1.0;
 
+        final growthRes = StudentGrowthCalculator.calculate(
+          studentRecords: studentRecords,
+          allExams: allExams,
+        );
+        final growthRate = growthRes['rate'] as double;
+        final trendText = growthRes['trend'] as String;
+        String growthTrend = '유지';
+        if (trendText == '상승 중') {
+          growthTrend = '▲ 상승 중';
+        } else if (trendText == '하락 중') {
+          growthTrend = '▼ 하락 중';
+        }
+
         final studentStats = StudentStats(
           id: studentId,
           name: name,
@@ -459,9 +510,9 @@ class StudentRepositoryImpl implements StudentRepository {
           registrationDate: registrationDate,
           memo: memo,
           isActive: isActive,
-          averageScore: scoresList.isNotEmpty ? scoresList.reduce((a, b) => a + b) / scoresList.length : 0.0,
-          growthRate: 0.0,
-          growthTrend: '-',
+          averageScore: percentagesList.isNotEmpty ? percentagesList.reduce((a, b) => a + b) / percentagesList.length : 0.0,
+          growthRate: growthRate,
+          growthTrend: growthTrend,
           attendanceRate: attendanceRate,
           homeworkCompletionRate: homeworkRate,
           riskScore: riskRes.score,
@@ -474,6 +525,7 @@ class StudentRepositoryImpl implements StudentRepository {
           homeworkLogs: homeworkLogs,
           consultingLogs: consultingLogs,
           aiEvaluation: ai,
+          groupComparisons: groupComparisons,
         );
       },
     );
@@ -603,7 +655,7 @@ class StudentRepositoryImpl implements StudentRepository {
         });
       } else {
         final legacyUp = data['updatedAt'] as Timestamp?;
-        final newUp = (newDocSnap.data() as Map<String, dynamic>?)?['updatedAt'] as Timestamp?;
+        final newUp = newDocSnap.data()?['updatedAt'] as Timestamp?;
         bool useLegacy = true;
         if (legacyUp != null && newUp != null) {
           useLegacy = legacyUp.compareTo(newUp) > 0;

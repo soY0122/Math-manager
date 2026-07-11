@@ -40,7 +40,7 @@ class PerformanceStats extends StatelessWidget {
               _buildProgressRow(
                 context,
                 title: '평균 시험 점수',
-                value: '${monthlyAverageScore.toStringAsFixed(1)}점',
+                value: '${monthlyAverageScore.toStringAsFixed(1)}%',
                 percentage: monthlyAverageScore / 100,
                 color: examGroupColor ?? theme.colorScheme.primary,
                 onTap: () => context.go('/grades'),

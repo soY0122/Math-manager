@@ -30,7 +30,7 @@ class AttendanceRepositoryImpl implements AttendanceRepository {
         });
       } else {
         final legacyUp = data['updatedAt'] as Timestamp?;
-        final newUp = (newDocSnap.data() as Map<String, dynamic>?)?['updatedAt'] as Timestamp?;
+        final newUp = newDocSnap.data()?['updatedAt'] as Timestamp?;
         bool useLegacy = true;
         if (legacyUp != null && newUp != null) {
           useLegacy = legacyUp.compareTo(newUp) > 0;

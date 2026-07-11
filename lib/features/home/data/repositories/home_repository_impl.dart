@@ -40,7 +40,44 @@ class HomeRepositoryImpl implements HomeRepository {
         final allAttendances = attendancesSnap.docs.map((doc) => doc.data()).toList();
         final allHomeworks = homeworksSnap.docs.map((doc) => doc.data()).toList();
         
-        final rawRecords = examRecordsSnap.docs.map((doc) => doc.data()).toList();
+        final Map<String, int> examMaxScores = {};
+        for (final doc in examsSnap.docs) {
+          final data = doc.data();
+          final maxScore = data['maxPossibleScore'] as int? ?? 100;
+          examMaxScores[doc.id] = maxScore;
+        }
+
+        final List<Map<String, dynamic>> cleanRecords = [];
+        final Set<String> seenStudentExams = {};
+        for (final doc in examRecordsSnap.docs) {
+          final r = doc.data();
+          final examId = r['examId'] as String?;
+          final studentId = r['studentId'] as String?;
+          if (examId == null || studentId == null || studentId.trim().isEmpty) continue;
+          
+          final scoreVal = r['score'];
+          if (scoreVal == null) continue;
+          
+          int? parsedScore;
+          if (scoreVal is int) {
+            parsedScore = scoreVal;
+          } else if (scoreVal is String) {
+            parsedScore = int.tryParse(scoreVal.trim());
+          }
+          
+          if (parsedScore == null || parsedScore < 0) continue;
+          
+          final limit = examMaxScores[examId] ?? 100;
+          if (parsedScore > limit) continue;
+          
+          final key = '${examId}_$studentId';
+          if (!seenStudentExams.contains(key)) {
+            seenStudentExams.add(key);
+            r['score'] = parsedScore;
+            cleanRecords.add(r);
+          }
+        }
+
         final rawExams = examsSnap.docs.map((doc) => doc.data()..['docId'] = doc.id).toList();
 
         final allExams = (examGroupId != null && examGroupId.isNotEmpty)
@@ -48,8 +85,8 @@ class HomeRepositoryImpl implements HomeRepository {
             : rawExams;
         final allExamIds = allExams.map((e) => e['docId'] as String).toSet();
         final allRecords = (examGroupId != null && examGroupId.isNotEmpty)
-            ? rawRecords.where((r) => allExamIds.contains(r['examId'] as String? ?? '')).toList()
-            : rawRecords;
+            ? cleanRecords.where((r) => allExamIds.contains(r['examId'] as String? ?? '')).toList()
+            : cleanRecords;
 
         var activeStudents = allStudents.where((s) => s['isActive'] == true).toList();
         if (gradeFilter != null) {
@@ -99,7 +136,11 @@ class HomeRepositoryImpl implements HomeRepository {
             .where((r) => activeStudentIds.contains(r['studentId'] as String? ?? ''))
             .toList();
         final double monthlyAvgScore = activeStudentRecords.isNotEmpty
-            ? activeStudentRecords.map((r) => r['score'] as int).reduce((a, b) => a + b) / activeStudentRecords.length
+            ? activeStudentRecords.map((r) {
+                final examId = r['examId'] as String?;
+                final limit = examMaxScores[examId] ?? 100;
+                return (r['score'] as int) / limit * 100;
+              }).reduce((a, b) => a + b) / activeStudentRecords.length
             : 0.0;
 
         final activeStudentAtts = allAttendances
@@ -204,6 +245,7 @@ class HomeRepositoryImpl implements HomeRepository {
             examLogsForRisk.add({
               'date': examDateTs.toDate(),
               'score': score,
+              'maxPossibleScore': examDoc['maxPossibleScore'] as int? ?? 100,
             });
           }
 
@@ -265,6 +307,61 @@ class HomeRepositoryImpl implements HomeRepository {
 
         recent.sort((a, b) => b.description.compareTo(a.description));
 
+        // Group-based comparison analytics
+        final Map<String, List<double>> groupAveragesMap = {};
+        for (final exam in allExams) {
+          final examGroupId = exam['examGroupId'] as String? ?? '';
+          if (examGroupId.isEmpty) continue;
+          final examId = exam['docId'] as String;
+          
+          final examRecs = allRecords.where((r) => r['examId'] == examId).toList();
+          if (examRecs.isEmpty) continue;
+          
+          final maxScore = exam['maxPossibleScore'] as int? ?? 100;
+          final examAvg = examRecs.map((r) => (r['score'] as int) / maxScore * 100).reduce((a, b) => a + b) / examRecs.length;
+          
+          groupAveragesMap.putIfAbsent(examGroupId, () => []).add(examAvg);
+        }
+
+        double? highestClassAvg;
+        double? lowestClassAvg;
+        if (groupAveragesMap.isNotEmpty) {
+          final averages = groupAveragesMap.entries.map((entry) {
+            final avg = entry.value.reduce((a, b) => a + b) / entry.value.length;
+            return avg;
+          }).toList();
+          highestClassAvg = averages.reduce((a, b) => a > b ? a : b);
+          lowestClassAvg = averages.reduce((a, b) => a < b ? a : b);
+        }
+
+        String? mostImprovedStudent;
+        double? biggestImprovement;
+        if (leaderboard.isNotEmpty) {
+          mostImprovedStudent = leaderboard.first.studentName;
+          biggestImprovement = leaderboard.first.growthRate;
+        }
+
+        int studentsAboveClassAvg = 0;
+        int studentsBelowClassAvg = 0;
+        for (final s in activeStudents) {
+          final sId = s['docId'] as String;
+          final sRecs = allRecords.where((r) => r['studentId'] == sId).toList();
+          if (sRecs.isEmpty) continue;
+          final sPcts = sRecs.map((r) {
+            final examId = r['examId'] as String;
+            final exam = allExams.firstWhere((e) => e['docId'] == examId, orElse: () => <String, dynamic>{});
+            final maxScore = exam['maxPossibleScore'] as int? ?? 100;
+            return (r['score'] as int) / maxScore * 100;
+          }).toList();
+          final sAvg = sPcts.reduce((a, b) => a + b) / sPcts.length;
+          
+          if (sAvg >= monthlyAvgScore) {
+            studentsAboveClassAvg++;
+          } else {
+            studentsBelowClassAvg++;
+          }
+        }
+
         final String aiSummary = dangerCount > 0
             ? '최근 시험 성적 분석 결과 성적이 고속 상승 중인 학생이 ${risingCount}명 관찰되었으나, 최근 출결 및 학습 패턴에 변화가 감지되어 추가 모니터링 및 개별 보강 지도 지원이 권장되는 집중 관리 학생이 ${dangerCount}명 존재합니다.'
             : '전체 재원생들의 평균 성적이 안정적으로 상승하고 있으며, 이번 달 출석률 ${(monthlyAttendanceRate * 100).toStringAsFixed(0)}%로 양호합니다. 과제 완료 상태도 성실히 유지되고 있습니다.';
@@ -281,6 +378,12 @@ class HomeRepositoryImpl implements HomeRepository {
           aiAnalysisSummary: aiSummary,
           growthLeaderboard: leaderboard.take(5).toList(),
           recentActivity: recent.take(5).toList(),
+          highestClassAvg: highestClassAvg,
+          lowestClassAvg: lowestClassAvg,
+          mostImprovedStudent: mostImprovedStudent,
+          biggestImprovement: biggestImprovement,
+          studentsAboveClassAvg: studentsAboveClassAvg,
+          studentsBelowClassAvg: studentsBelowClassAvg,
         );
       },
     );
